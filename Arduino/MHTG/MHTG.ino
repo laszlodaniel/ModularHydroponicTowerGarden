@@ -36,7 +36,7 @@
 
 // Firmware date/time of compilation in 64-bit UNIX time
 // https://www.epochconverter.com/hex
-#define FW_DATE 0x000000005E1C9893
+#define FW_DATE 0x000000005E1CAAF1
 
 #define TEMP_EXT      A0 // external 10k NTC thermistor is connected to this analog pin
 #define TEMP_INT      A1 // internal 10k NTC thermistor is connected to this analog pin
@@ -883,7 +883,7 @@ void handle_usb_data(void)
                                     EEPROM.update(index + i, cmd_payload[2 + i]);
                                 }
 
-                                send_usb_packet(debug, 0x01, ack, 1);
+                                send_usb_packet(debug, 0x02, ack, 1);
                             }
                             break;
                         }
