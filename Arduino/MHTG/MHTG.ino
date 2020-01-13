@@ -36,7 +36,7 @@
 
 // Firmware date/time of compilation in 64-bit UNIX time
 // https://www.epochconverter.com/hex
-#define FW_DATE 0x000000005E1CAAF1
+#define FW_DATE 0x000000005E1CDB2A
 
 #define TEMP_EXT      A0 // external 10k NTC thermistor is connected to this analog pin
 #define TEMP_INT      A1 // internal 10k NTC thermistor is connected to this analog pin
@@ -44,9 +44,9 @@
 #define WATERPUMP_PIN 9  // waterpump pwm output
 
 // Set (1), clear (0) and invert (1->0; 0->1) bit in a register or variable easily
-#define sbi(variable, bit) (variable) |=  (1 << (bit))
-#define cbi(variable, bit) (variable) &= ~(1 << (bit))
-#define ibi(variable, bit) (variable) ^=  (1 << (bit))
+#define sbi(reg, bit) (reg) |=  (1 << (bit))
+#define cbi(reg, bit) (reg) &= ~(1 << (bit))
+#define ibi(reg, bit) (reg) ^=  (1 << (bit))
 
 // Packet related stuff
 // DATA CODE byte building blocks
@@ -73,6 +73,9 @@
 // 0x06-0xFD reserved
 #define error_internal                          0xFE
 #define error_fatal                             0xFF
+
+// Construct an object called "lcd" for the external display (optional)
+LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
 
 // Variables
 uint32_t Ve, Vi; // raw analog voltage readings (external, internal temperatures)
@@ -119,6 +122,11 @@ uint8_t ack[1] = { 0x00 }; // acknowledge payload array
 uint8_t err[1] = { 0xFF }; // error payload array
 uint8_t ret[1]; // general array to store arbitrary bytes
 
+// LCD related variables
+// Custom LCD-characters
+// https://maxpromer.github.io/LCD-Character-Creator/
+uint8_t degree_symbol[8] = { 0x06, 0x09, 0x09, 0x06, 0x00, 0x00, 0x00, 0x00 }; // °
+
 typedef union {
     float number;
     uint8_t bytes[4];
@@ -161,9 +169,32 @@ void get_temps(float *te, float *ti)
     Ci = Ki - 273.15; // Celsius
     Fi = ((9.0 * Ci) / 5.00) + 32.00; // Fahrenheit
 
-    // Save values in the input arrays
-    te[0] = Ke; te[1] = Ce; te[2] = Fe;
-    ti[0] = Ki; ti[1] = Ci; ti[2] = Fi;
+    // Save values in the input arrays, disconnected sensor data is replaced by zeros
+    if (Ke != 0)
+    {
+        te[0] = Ke;
+        te[1] = Ce;
+        te[2] = Fe;
+    }
+    else
+    {
+        te[0] = 0;
+        te[1] = 0;
+        te[2] = 0;
+    }
+
+    if (Ki != 0)
+    {
+        ti[0] = Ki;
+        ti[1] = Ci;
+        ti[2] = Fi;
+    }
+    else
+    {
+        ti[0] = 0;
+        ti[1] = 0;
+        ti[2] = 0;
+    }
 
     // Save float values as their 4-byte constituents
     switch (temperature_unit)
@@ -406,6 +437,7 @@ void update_status(void)
 Function: send_hwfw_info()
 Purpose:  gather hardware version/date, assembly date and firmware date
           into an array and send through serial link
+Note:     -
 **************************************************************************/
 void send_hwfw_info(void)
 {
@@ -444,6 +476,29 @@ void send_hwfw_info(void)
     send_usb_packet(response, 0x02, ret, 26);
     
 } // end of evaluate_eep_checksum
+
+
+/*************************************************************************
+Function: lcd_init()
+Purpose:  initialize LCD
+Note:     -
+**************************************************************************/
+void lcd_init(void)
+{
+    lcd.begin(20, 4); // start LCD with 20 columns and 4 rows
+    lcd.backlight();  // backlight on
+    lcd.clear();      // clear display
+    lcd.home();       // set cursor in home position (0, 0)
+    lcd.print(F("--------------------")); // F(" ") makes the compiler store the string inside flash memory instead of RAM, good practice if system is low on RAM
+    lcd.setCursor(0, 1);
+    lcd.print(F(" MODULAR HYDROPONIC "));
+    lcd.setCursor(0, 2);
+    lcd.print(F(" TOWER GARDEN V1.02 "));
+    lcd.setCursor(0, 3);
+    lcd.print(F("--------------------"));
+    lcd.createChar(0, degree_symbol); // custom character from "degree_symbol" variable with id number 0
+    
+} // end of lcd_init
 
 
 /*****************************************************************************
@@ -972,6 +1027,7 @@ void setup()
         inv_beta = 1.00 / (float)beta;
     }
 
+    lcd_init();
     wpump_on = true;
     wdt_enable(WDTO_4S); // reset program if it hangs for more than 4 seconds
     send_usb_packet(reset, 0x01, ack, 1); // confirm device readiness
