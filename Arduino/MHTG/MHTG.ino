@@ -1,6 +1,6 @@
 /*
  * ModularHydroponicTowerGarden (https://github.com/laszlodaniel/ModularHydroponicTowerGarden)
- * Copyright (C) 2019, László Dániel
+ * Copyright (C) 2020, László Dániel
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -36,7 +36,7 @@
 
 // Firmware date/time of compilation in 64-bit UNIX time
 // https://www.epochconverter.com/hex
-#define FW_DATE 0x000000005E456A55
+#define FW_DATE 0x000000005E45719B
 
 #define TEMP_EXT      A0 // external 10k NTC thermistor is connected to this analog pin
 #define TEMP_INT      A1 // internal 10k NTC thermistor is connected to this analog pin
@@ -302,34 +302,37 @@ Note:     it's easier on the power supply if the pump speed is changed slowly
 ******************************************************************************/
 void change_wpump_speed(uint8_t new_wpump_pwm)
 {
-    if (new_wpump_pwm == 0)
+    if (wpump_on || service_mode)
     {
-        digitalWrite(WATERPUMP_PIN, LOW);
-        digitalWrite(LED_PIN, HIGH); // turn off indicator LED
-        old_wpump_pwm = 0;
-        return;
-    }
+        if (new_wpump_pwm == 0)
+        {
+            digitalWrite(WATERPUMP_PIN, LOW);
+            digitalWrite(LED_PIN, HIGH); // turn off indicator LED
+            old_wpump_pwm = 0;
+            return;
+        }
+        
+        // Gradually change from old speed to new speed
+        if (new_wpump_pwm > old_wpump_pwm) // increase speed
+        {
+            for (uint16_t i = old_wpump_pwm; i <= new_wpump_pwm; i++)
+            {
+                analogWrite(WATERPUMP_PIN, i);
+                delay(15);
+            }
+        }
+        else if (new_wpump_pwm < old_wpump_pwm) // decrease speed
+        {
+            for (uint16_t i = old_wpump_pwm; i >= new_wpump_pwm; i--)
+            {
+                analogWrite(WATERPUMP_PIN, i);
+                delay(15);
+            }
+        }
     
-    // Gradually change from old speed to new speed
-    if (new_wpump_pwm > old_wpump_pwm) // increase speed
-    {
-        for (uint16_t i = old_wpump_pwm; i <= new_wpump_pwm; i++)
-        {
-            analogWrite(WATERPUMP_PIN, i);
-            delay(15);
-        }
+        digitalWrite(LED_PIN, LOW); // turn on indicator LED
+        old_wpump_pwm = new_wpump_pwm; // save last set pwm-level
     }
-    else if (new_wpump_pwm < old_wpump_pwm) // decrease speed
-    {
-        for (uint16_t i = old_wpump_pwm; i >= new_wpump_pwm; i--)
-        {
-            analogWrite(WATERPUMP_PIN, i);
-            delay(15);
-        }
-    }
-
-    digitalWrite(LED_PIN, LOW); // turn on indicator LED
-    old_wpump_pwm = new_wpump_pwm; // save last set pwm-level
 }
 
 
@@ -1049,9 +1052,9 @@ void loop()
         {
             if (wpump_on)
             {
-                wpump_on = false;
                 wpump_interval = wpump_offtime;
                 change_wpump_speed(0); // set zero speed to turn off
+                wpump_on = false;
             }
             else
             {
