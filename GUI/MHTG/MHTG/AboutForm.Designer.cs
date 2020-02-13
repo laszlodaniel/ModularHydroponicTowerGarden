@@ -30,6 +30,8 @@
         {
             this.AboutPictureBox = new System.Windows.Forms.PictureBox();
             this.AboutTitleLabel = new System.Windows.Forms.Label();
+            this.label1 = new System.Windows.Forms.Label();
+            this.label2 = new System.Windows.Forms.Label();
             ((System.ComponentModel.ISupportInitialize)(this.AboutPictureBox)).BeginInit();
             this.SuspendLayout();
             // 
@@ -54,11 +56,31 @@
             this.AboutTitleLabel.TabIndex = 1;
             this.AboutTitleLabel.Text = "Modular Hydroponic Tower Garden";
             // 
+            // label1
+            // 
+            this.label1.AutoSize = true;
+            this.label1.Location = new System.Drawing.Point(140, 35);
+            this.label1.Name = "label1";
+            this.label1.Size = new System.Drawing.Size(278, 13);
+            this.label1.TabIndex = 2;
+            this.label1.Text = "A user interface to interact with the water pump controller.";
+            // 
+            // label2
+            // 
+            this.label2.AutoSize = true;
+            this.label2.Location = new System.Drawing.Point(296, 120);
+            this.label2.Name = "label2";
+            this.label2.Size = new System.Drawing.Size(134, 13);
+            this.label2.TabIndex = 3;
+            this.label2.Text = "Version: MHTG.2020.0001";
+            // 
             // AboutForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(433, 239);
+            this.ClientSize = new System.Drawing.Size(434, 141);
+            this.Controls.Add(this.label2);
+            this.Controls.Add(this.label1);
             this.Controls.Add(this.AboutTitleLabel);
             this.Controls.Add(this.AboutPictureBox);
             this.MaximizeBox = false;
@@ -77,5 +99,7 @@
 
         private System.Windows.Forms.PictureBox AboutPictureBox;
         private System.Windows.Forms.Label AboutTitleLabel;
+        private System.Windows.Forms.Label label1;
+        private System.Windows.Forms.Label label2;
     }
 }

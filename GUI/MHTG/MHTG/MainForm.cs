@@ -39,6 +39,8 @@ namespace MHTG
         public static string USBLogFilename;
         public static string USBBinaryLogFilename;
 
+        public bool WaterPumpState = false;
+
         public byte[] ResetDevice = new byte[] { 0x3D, 0x00, 0x02, 0x00, 0x00, 0x02 };
         public byte[] HandshakeRequest = new byte[] { 0x3D, 0x00, 0x02, 0x01, 0x01, 0x04 };
         public byte[] ExpectedHandshake = new byte[] { 0x3D, 0x00, 0x06, 0x81, 0x00, 0x4D, 0x48, 0x54, 0x47, 0xB7 };
@@ -49,6 +51,10 @@ namespace MHTG
         public byte[] TemperatureRequest = new byte[] { 0x3D, 0x00, 0x02, 0x04, 0x04, 0x0A };
         public byte[] GetStatusUpdatesOn = new byte[] { 0x3D, 0x00, 0x03, 0x03, 0x03, 0x01, 0x0A };
         public byte[] GetStatusUpdatesOff = new byte[] { 0x3D, 0x00, 0x03, 0x03, 0x03, 0x00, 0x09 };
+        public byte[] ServiceModeOn = new byte[] { 0x3D, 0x00, 0x03, 0x03, 0x04, 0x01, 0x0B };
+        public byte[] ServiceModeOff = new byte[] { 0x3D, 0x00, 0x03, 0x03, 0x04, 0x00, 0x0A };
+        public byte[] TurnOnWaterPump = new byte[] { 0x3D, 0x00, 0x03, 0x03, 0x05, 0x00, 0x0B };
+        public byte[] TurnOffWaterPump = new byte[] { 0x3D, 0x00, 0x03, 0x03, 0x05, 0x00, 0x0B };
 
         AboutForm about;
         SerialPort Serial = new SerialPort();
@@ -87,8 +93,6 @@ namespace MHTG
             SettingsGroupBox.Enabled = false;
             TemperaturesGroupBox.Enabled = false;
             NTCBetaValueModifyCheckBox_CheckedChanged(this, EventArgs.Empty);
-            StatusButton.Enabled = false;
-            ResetButton.Enabled = false;
             SendComboBox.Items.Clear();
 
             ActiveControl = ConnectButton; // put focus on the connect button
@@ -142,6 +146,8 @@ namespace MHTG
         {
             if (!DeviceFound) // connect
             {
+                UpdateCOMPortList();
+
                 if (SerialPortAvailable)
                 {
                     while (ConnectionCounter < 5) // try connecting to the device 5 times, then give up
@@ -201,6 +207,7 @@ namespace MHTG
                                 Util.UpdateTextBox(CommunicationTextBox, "[INFO] Device is not responding at " + Serial.PortName, null);
                                 Timeout = false;
                                 Serial.Close();
+                                ConnectionCounter++; // increase counter value and try again
                             }
                             else
                             {
@@ -213,7 +220,6 @@ namespace MHTG
                                     Util.UpdateTextBox(CommunicationTextBox, "[INFO] Device connected (" + Serial.PortName + ")", null);
                                     UpdatePort = Serial.PortName;
                                     ConnectButton.Text = "Disconnect";
-                                    ConnectButton.Enabled = true;
                                     SettingsGroupBox.Enabled = true;
                                     TemperaturesGroupBox.Enabled = true;
                                     StatusButton.Enabled = true;
@@ -235,10 +241,8 @@ namespace MHTG
                             }
                         }
                     }
-                }
-                else
-                {
-                    Util.UpdateTextBox(CommunicationTextBox, "[INFO] No device available", null);
+
+                    ConnectButton.Enabled = true;
                 }
             }
             else // disconnect
@@ -277,8 +281,13 @@ namespace MHTG
             {
                 if (bufferlist[0] == 0x3D)
                 {
+                    if (bufferlist.Count < 3) break; // wait for the length bytes
+                    
                     int PacketLength = (bufferlist[1] << 8) + bufferlist[2];
                     int FullPacketLength = PacketLength + 4;
+
+                    if (bufferlist.Count < FullPacketLength) break; // wait for the rest of the bytes to arrive
+
                     byte[] packet = new byte[FullPacketLength];
                     int PayloadLength = PacketLength - 2;
                     byte[] Payload = new byte[PayloadLength];
@@ -309,7 +318,7 @@ namespace MHTG
                         {
                             if (PayloadLength > 0) // copy payload bytes if available
                             {
-                                Array.Copy(packet, 5, Payload, 0, PayloadLength);
+                                Array.Copy(packet, 5, Payload, 0, Payload.Length);
                             }
 
                             switch (Command) // based on the datacode decide what to do with this packet
@@ -336,17 +345,20 @@ namespace MHTG
                                 case 0x02: // Status
                                     if (Payload.Length > 13)
                                     {
-                                        string WaterPumpState = string.Empty;
-                                        string WaterPumpPercentLevel = ((float)Payload[1] / 255 * 100).ToString("0") + "%";
+                                        string WaterPumpStateString = string.Empty;
+                                        byte WaterPumpPercentValue = (byte)(Math.Round((float)(Payload[1] + 1) / 256 * 100));
+                                        string WaterPumpPercentLevel = WaterPumpPercentValue.ToString("0") + "%";
                                         string ServiceModeString = string.Empty;
 
                                         if ((Payload[0] & 0x01) == 0x01)
                                         {
-                                            WaterPumpState = "on @ " + WaterPumpPercentLevel;
+                                            WaterPumpStateString = "on @ " + WaterPumpPercentLevel;
+                                            WaterPumpState = true;
                                         }
                                         else
                                         {
-                                            WaterPumpState = "off";
+                                            WaterPumpStateString = "off";
+                                            WaterPumpState = false;
                                         }
                                         
                                         if (((Payload[0] >> 1) & 0x01) == 0x01)
@@ -407,7 +419,7 @@ namespace MHTG
                                         Util.UpdateTextBox(CommunicationTextBox, "[RX->] Status response", packet);
                                         Util.UpdateTextBox(CommunicationTextBox, "[INFO] Current status: " + Environment.NewLine +
                                                                                  "       - service mode: " + ServiceModeString + Environment.NewLine +
-                                                                                 "       - water pump state: " + WaterPumpState + Environment.NewLine +
+                                                                                 "       - water pump state: " + WaterPumpStateString + Environment.NewLine +
                                                                                  "       - remaining time: " + RemainingTimeString + Environment.NewLine +
                                                                                  "       - temperatures: " + Environment.NewLine +
                                                                                  TemperatureString, null);
@@ -424,7 +436,7 @@ namespace MHTG
                                             if (PayloadLength > 12)
                                             {
                                                 Util.UpdateTextBox(CommunicationTextBox, "[RX->] Settings response", packet);
-                                                WaterPumpSpeed = (byte)(Math.Round((float)Payload[0] / 255 * 100)); // convert PWM value to percent
+                                                WaterPumpSpeed = (byte)(Math.Round((float)(Payload[0] + 1) / 256 * 100)); // convert PWM value to percent
                                                 WaterPumpOnTime = (uint)((Payload[1] << 24) | (Payload[2] << 16) | (Payload[3] << 8) | Payload[4]);
                                                 WaterPumpOffTime = (uint)((Payload[5] << 24) | (Payload[6] << 16) | (Payload[7] << 8) | Payload[8]);
                                                 TemperatureSensors = Payload[9];
@@ -542,13 +554,13 @@ namespace MHTG
                                             {
                                                 if (Payload[0] == 0x00)
                                                 {
-                                                    Util.UpdateTextBox(CommunicationTextBox, "[RX->] Automatic status update response", packet);
-                                                    Util.UpdateTextBox(CommunicationTextBox, "[INFO] Automatic status update disabled", null);
+                                                    Util.UpdateTextBox(CommunicationTextBox, "[RX->] Regular status update response", packet);
+                                                    Util.UpdateTextBox(CommunicationTextBox, "[INFO] Regular status update disabled", null);
                                                 }
                                                 else
                                                 {
-                                                    Util.UpdateTextBox(CommunicationTextBox, "[RX->] Automatic status update response", packet);
-                                                    Util.UpdateTextBox(CommunicationTextBox, "[INFO] Automatic status update enabled", null);
+                                                    Util.UpdateTextBox(CommunicationTextBox, "[RX->] Regular status update response", packet);
+                                                    Util.UpdateTextBox(CommunicationTextBox, "[INFO] Regular status update enabled", null);
                                                 }
                                             }
                                             else
@@ -586,7 +598,7 @@ namespace MHTG
                                                 else
                                                 {
                                                     Util.UpdateTextBox(CommunicationTextBox, "[RX->] Water pump status", packet);
-                                                    Util.UpdateTextBox(CommunicationTextBox, "[INFO] Water pump turned on @ " + Math.Round((float)Payload[0] / 255 * 100).ToString("0") + "%", null);
+                                                    Util.UpdateTextBox(CommunicationTextBox, "[INFO] Water pump turned on @ " + Math.Round((float)(Payload[0] + 1) / 256 * 100).ToString("0") + "%", null);
                                                 }
                                             }
                                             else
@@ -796,7 +808,8 @@ namespace MHTG
         private void WriteSettingsButton_Click(object sender, EventArgs e)
         {
             // Get values from controls
-            WaterPumpSpeed = (byte)((WaterPumpSpeedTrackBar.Value * 256 / 100) - 1); // convert percent to PWM value (0-255)
+            if (WaterPumpSpeedTrackBar.Value == 0) WaterPumpSpeed = 0;
+            else WaterPumpSpeed = (byte)((WaterPumpSpeedTrackBar.Value * 256 / 100) - 1); // convert percent to PWM value (0-255)
 
             uint.TryParse(WaterPumpOnTimeTextBox.Text, out WaterPumpOnTime); // 0 if failed
             if (WaterPumpOnTime <= 0) WaterPumpOnTime = 15; // minutes default
@@ -914,20 +927,16 @@ namespace MHTG
 
         private void StatusButton_Click(object sender, EventArgs e)
         {
-            if (Serial.IsOpen)
-            {
-                Util.UpdateTextBox(CommunicationTextBox, "[<-TX] Status request", StatusRequest);
-                Serial.Write(StatusRequest, 0, StatusRequest.Length);
-            }
+
+            Util.UpdateTextBox(CommunicationTextBox, "[<-TX] Status request", StatusRequest);
+            Serial.Write(StatusRequest, 0, StatusRequest.Length);
+
         }
 
         private void ResetButton_Click(object sender, EventArgs e)
         {
-            if (Serial.IsOpen)
-            {
-                Util.UpdateTextBox(CommunicationTextBox, "[<-TX] Reset device", ResetDevice);
-                Serial.Write(ResetDevice, 0, ResetDevice.Length);
-            }
+            Util.UpdateTextBox(CommunicationTextBox, "[<-TX] Reset device", ResetDevice);
+            Serial.Write(ResetDevice, 0, ResetDevice.Length);
         }
 
         private void SendButton_Click(object sender, EventArgs e)
@@ -1085,6 +1094,49 @@ namespace MHTG
             else
             {
                 Util.UpdateTextBox(CommunicationTextBox, "[INFO] Device firmware update error", null);
+            }
+        }
+
+        private void ServiceModeToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        {
+            if (Serial.IsOpen)
+            {
+                if (ServiceModeToolStripMenuItem.Checked)
+                {
+                    Util.UpdateTextBox(CommunicationTextBox, "[<-TX] Enable service mode", ServiceModeOn);
+                    Serial.Write(ServiceModeOn, 0, ServiceModeOn.Length);
+                }
+                else
+                {
+                    Util.UpdateTextBox(CommunicationTextBox, "[<-TX] Disable service mode", ServiceModeOff);
+                    Serial.Write(ServiceModeOff, 0, ServiceModeOff.Length);
+                }
+            }
+        }
+
+        private void WaterPumpOnOffCheckBox_CheckedChanged(object sender, EventArgs e)
+        {
+            if (Serial.IsOpen)
+            {
+                if (WaterPumpOnOffCheckBox.Checked)
+                {
+                    TurnOnWaterPump[5] = (byte)((WaterPumpSpeedTrackBar.Value * 256 / 100) - 1); // payload contains pwm-level
+
+                    byte checksum = 0;
+                    for (int i = 1; i < 6; i++)
+                    {
+                        checksum += TurnOnWaterPump[i];
+                    }
+                    TurnOnWaterPump[6] = checksum; // re-calculate checksum
+
+                    Util.UpdateTextBox(CommunicationTextBox, "[<-TX] Turn on water pump", TurnOnWaterPump);
+                    Serial.Write(TurnOnWaterPump, 0, TurnOnWaterPump.Length);
+                }
+                else
+                {
+                    Util.UpdateTextBox(CommunicationTextBox, "[<-TX] Turn off water pump", TurnOffWaterPump);
+                    Serial.Write(TurnOffWaterPump, 0, TurnOffWaterPump.Length);
+                }
             }
         }
     }

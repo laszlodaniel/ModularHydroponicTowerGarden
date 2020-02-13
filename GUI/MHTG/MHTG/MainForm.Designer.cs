@@ -32,6 +32,7 @@
             this.ToolsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.UpdateFirmwareToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.ShowDebugToolsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.ServiceModeToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.AboutToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.CommunicationGroupBox = new System.Windows.Forms.GroupBox();
             this.SendButton = new System.Windows.Forms.Button();
@@ -73,6 +74,7 @@
             this.TemperatureUnitLabel02 = new System.Windows.Forms.Label();
             this.TemperaturesGroupBox = new System.Windows.Forms.GroupBox();
             this.DebugGroupBox = new System.Windows.Forms.GroupBox();
+            this.WaterPumpOnOffCheckBox = new System.Windows.Forms.CheckBox();
             this.GetStatusUpdatesCheckBox = new System.Windows.Forms.CheckBox();
             this.MenuStrip.SuspendLayout();
             this.CommunicationGroupBox.SuspendLayout();
@@ -98,7 +100,8 @@
             // 
             this.ToolsToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.UpdateFirmwareToolStripMenuItem,
-            this.ShowDebugToolsToolStripMenuItem});
+            this.ShowDebugToolsToolStripMenuItem,
+            this.ServiceModeToolStripMenuItem});
             this.ToolsToolStripMenuItem.Name = "ToolsToolStripMenuItem";
             this.ToolsToolStripMenuItem.Size = new System.Drawing.Size(46, 20);
             this.ToolsToolStripMenuItem.Text = "Tools";
@@ -106,7 +109,7 @@
             // UpdateFirmwareToolStripMenuItem
             // 
             this.UpdateFirmwareToolStripMenuItem.Name = "UpdateFirmwareToolStripMenuItem";
-            this.UpdateFirmwareToolStripMenuItem.Size = new System.Drawing.Size(180, 22);
+            this.UpdateFirmwareToolStripMenuItem.Size = new System.Drawing.Size(169, 22);
             this.UpdateFirmwareToolStripMenuItem.Text = "Update firmware";
             this.UpdateFirmwareToolStripMenuItem.Click += new System.EventHandler(this.UpdateFirmwareToolStripMenuItem_Click);
             // 
@@ -114,9 +117,17 @@
             // 
             this.ShowDebugToolsToolStripMenuItem.CheckOnClick = true;
             this.ShowDebugToolsToolStripMenuItem.Name = "ShowDebugToolsToolStripMenuItem";
-            this.ShowDebugToolsToolStripMenuItem.Size = new System.Drawing.Size(180, 22);
+            this.ShowDebugToolsToolStripMenuItem.Size = new System.Drawing.Size(169, 22);
             this.ShowDebugToolsToolStripMenuItem.Text = "Show debug tools";
             this.ShowDebugToolsToolStripMenuItem.CheckedChanged += new System.EventHandler(this.ShowDebugToolsToolStripMenuItem_CheckedChanged);
+            // 
+            // ServiceModeToolStripMenuItem
+            // 
+            this.ServiceModeToolStripMenuItem.CheckOnClick = true;
+            this.ServiceModeToolStripMenuItem.Name = "ServiceModeToolStripMenuItem";
+            this.ServiceModeToolStripMenuItem.Size = new System.Drawing.Size(169, 22);
+            this.ServiceModeToolStripMenuItem.Text = "Service mode";
+            this.ServiceModeToolStripMenuItem.CheckedChanged += new System.EventHandler(this.ServiceModeToolStripMenuItem_CheckedChanged);
             // 
             // AboutToolStripMenuItem
             // 
@@ -441,6 +452,7 @@
             // 
             // StatusButton
             // 
+            this.StatusButton.Enabled = false;
             this.StatusButton.Location = new System.Drawing.Point(251, 19);
             this.StatusButton.Name = "StatusButton";
             this.StatusButton.Size = new System.Drawing.Size(50, 25);
@@ -451,6 +463,7 @@
             // 
             // ResetButton
             // 
+            this.ResetButton.Enabled = false;
             this.ResetButton.Location = new System.Drawing.Point(306, 19);
             this.ResetButton.Name = "ResetButton";
             this.ResetButton.Size = new System.Drawing.Size(50, 25);
@@ -543,6 +556,7 @@
             // 
             // DebugGroupBox
             // 
+            this.DebugGroupBox.Controls.Add(this.WaterPumpOnOffCheckBox);
             this.DebugGroupBox.Controls.Add(this.GetStatusUpdatesCheckBox);
             this.DebugGroupBox.Location = new System.Drawing.Point(388, 27);
             this.DebugGroupBox.Name = "DebugGroupBox";
@@ -551,12 +565,25 @@
             this.DebugGroupBox.TabStop = false;
             this.DebugGroupBox.Text = "Debug";
             // 
+            // WaterPumpOnOffCheckBox
+            // 
+            this.WaterPumpOnOffCheckBox.AutoSize = true;
+            this.WaterPumpOnOffCheckBox.Checked = true;
+            this.WaterPumpOnOffCheckBox.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.WaterPumpOnOffCheckBox.Location = new System.Drawing.Point(6, 528);
+            this.WaterPumpOnOffCheckBox.Name = "WaterPumpOnOffCheckBox";
+            this.WaterPumpOnOffCheckBox.Size = new System.Drawing.Size(290, 17);
+            this.WaterPumpOnOffCheckBox.TabIndex = 1;
+            this.WaterPumpOnOffCheckBox.Text = "Water pump on/off (only when service mode is enabled)";
+            this.WaterPumpOnOffCheckBox.UseVisualStyleBackColor = true;
+            this.WaterPumpOnOffCheckBox.CheckedChanged += new System.EventHandler(this.WaterPumpOnOffCheckBox_CheckedChanged);
+            // 
             // GetStatusUpdatesCheckBox
             // 
             this.GetStatusUpdatesCheckBox.AutoSize = true;
             this.GetStatusUpdatesCheckBox.Checked = true;
             this.GetStatusUpdatesCheckBox.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.GetStatusUpdatesCheckBox.Location = new System.Drawing.Point(6, 538);
+            this.GetStatusUpdatesCheckBox.Location = new System.Drawing.Point(6, 551);
             this.GetStatusUpdatesCheckBox.Name = "GetStatusUpdatesCheckBox";
             this.GetStatusUpdatesCheckBox.Size = new System.Drawing.Size(226, 17);
             this.GetStatusUpdatesCheckBox.TabIndex = 0;
@@ -648,6 +675,8 @@
         private System.Windows.Forms.ToolStripMenuItem UpdateFirmwareToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem ShowDebugToolsToolStripMenuItem;
         private System.Windows.Forms.CheckBox GetStatusUpdatesCheckBox;
+        private System.Windows.Forms.ToolStripMenuItem ServiceModeToolStripMenuItem;
+        private System.Windows.Forms.CheckBox WaterPumpOnOffCheckBox;
     }
 }
 

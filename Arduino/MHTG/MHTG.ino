@@ -36,7 +36,7 @@
 
 // Firmware date/time of compilation in 64-bit UNIX time
 // https://www.epochconverter.com/hex
-#define FW_DATE 0x000000005E1CDB2A
+#define FW_DATE 0x000000005E456A55
 
 #define TEMP_EXT      A0 // external 10k NTC thermistor is connected to this analog pin
 #define TEMP_INT      A1 // internal 10k NTC thermistor is connected to this analog pin
@@ -98,6 +98,7 @@ uint8_t eeprom_content[32];
 uint8_t hw_version[2] = { 0x00, 0x00 };
 uint8_t hw_date[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 uint8_t assembly_date[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+volatile uint8_t old_wpump_pwm = 0;
 volatile uint8_t wpump_pwm = 0; // 0: 0% - 255: 100%
 uint32_t wpump_ontime = 0; // 900000 milliseconds = 900 seconds = 15 minutes
 uint32_t wpump_offtime = 0; // 900000 milliseconds = 900 seconds = 15 minutes
@@ -164,7 +165,7 @@ void get_temps(float *te, float *ti)
     Ce = Ke - 273.15; // Celsius
     Fe = ((9.0 * Ce) / 5.00) + 32.00; // Fahrenheit
 
-    // Calculate external temperature using this equation involving the thermistor's beta property
+    // Calculate internal temperature using this equation involving the thermistor's beta property
     Ki = 1.00 / (inv_t0 + inv_beta * (log(1023.00 / (float)Vi - 1.00))); // Kelvin
     Ci = Ki - 273.15; // Celsius
     Fi = ((9.0 * Ci) / 5.00) + 32.00; // Fahrenheit
@@ -297,17 +298,38 @@ void handle_mode_button(void)
 /*****************************************************************************
 Function: -
 Purpose:  -
-Note:     -
+Note:     it's easier on the power supply if the pump speed is changed slowly
 ******************************************************************************/
-void wpump_rampup(uint8_t pwm_level)
+void change_wpump_speed(uint8_t new_wpump_pwm)
 {
-    // It's easier on the power supply if the pump is ramped up slowly
-    for (uint8_t i = 0; i < pwm_level; i++)
+    if (new_wpump_pwm == 0)
     {
-        analogWrite(WATERPUMP_PIN, i);
-        delay(15);
+        digitalWrite(WATERPUMP_PIN, LOW);
+        digitalWrite(LED_PIN, HIGH); // turn off indicator LED
+        old_wpump_pwm = 0;
+        return;
     }
-    analogWrite(WATERPUMP_PIN, pwm_level);
+    
+    // Gradually change from old speed to new speed
+    if (new_wpump_pwm > old_wpump_pwm) // increase speed
+    {
+        for (uint16_t i = old_wpump_pwm; i <= new_wpump_pwm; i++)
+        {
+            analogWrite(WATERPUMP_PIN, i);
+            delay(15);
+        }
+    }
+    else if (new_wpump_pwm < old_wpump_pwm) // decrease speed
+    {
+        for (uint16_t i = old_wpump_pwm; i >= new_wpump_pwm; i--)
+        {
+            analogWrite(WATERPUMP_PIN, i);
+            delay(15);
+        }
+    }
+
+    digitalWrite(LED_PIN, LOW); // turn on indicator LED
+    old_wpump_pwm = new_wpump_pwm; // save last set pwm-level
 }
 
 
@@ -366,7 +388,7 @@ void update_settings(void)
     assembly_date[6] = eeprom_content[0x10];
     assembly_date[7] = eeprom_content[0x11];
     wpump_pwm = eeprom_content[0x12];
-    wpump_rampup(wpump_pwm); // change water pump speed
+    change_wpump_speed(wpump_pwm); // change water pump speed
     wpump_ontime =  ((uint32_t)eeprom_content[0x13] << 24) | ((uint32_t)eeprom_content[0x14] << 16) | ((uint32_t)eeprom_content[0x15] << 8) | (uint32_t)eeprom_content[0x16];
     wpump_offtime = ((uint32_t)eeprom_content[0x17] << 24) | ((uint32_t)eeprom_content[0x18] << 16) | ((uint32_t)eeprom_content[0x19] << 8) | (uint32_t)eeprom_content[0x1A];
     
@@ -544,13 +566,13 @@ void send_usb_packet(uint8_t command, uint8_t subdatacode, uint8_t *payloadbuff,
     else payload_bytes = true;
 
     // Assemble datacode from input parameter
-    datacode = (1 << 7)  + command;
-    //          10000000 + 0000zzzz  =  1000zzzz  
+    datacode = command;
+    sbi(datacode, 7); // set highest bit to indicate the packet is coming from the device
 
     // Start assembling the packet by manually filling the first few slots
     packet[0] = 0x3D; // add SYNC byte
     packet[1] = ((packet_length - 4) >> 8) & 0xFF; // add LENGTH high byte
-    packet[2] =  (packet_length - 4) & 0xFF; // add LENGTH low byte
+    packet[2] = (packet_length - 4) & 0xFF; // add LENGTH low byte
     packet[3] = datacode; // add DATA CODE byte
     packet[4] = subdatacode; // add SUB-DATA CODE byte
     
@@ -570,8 +592,11 @@ void send_usb_packet(uint8_t command, uint8_t subdatacode, uint8_t *payloadbuff,
     packet[packet_length - 1] = calculated_checksum;
 
     // Send the prepared packet through serial link
-    Serial.write(packet, packet_length);
-    
+    for (uint16_t i = 0; i < packet_length; i++)
+    {
+        Serial.write(packet[i]);
+    }
+
 } // end of send_usb_packet
 
 
@@ -727,27 +752,26 @@ void handle_usb_data(void)
                         }
                         case 0x02: // write settings
                         {
-                            if (!payload_bytes || (payload_length < 12))
+                            if (payload_length < 13)
                             {
                                 send_usb_packet(ok_error, error_payload_invalid_values, err, 1);
+                                break;
                             }
-                            else
+
+                            for (uint8_t i = 0; i < 13; i++) // overwrite settings in the temporary EEPROM array
                             {
-                                for (uint8_t i = 0; i < 13; i++) // overwrite settings in the temporary EEPROM array
-                                {
-                                    eeprom_content[0x12 + i] = cmd_payload[i];
-                                }
-    
-                                eeprom_content[0x1F] = calculate_checksum(eeprom_content, 0, 31); // re-calculate checksum
-    
-                                for (uint8_t i = 0; i < 32; i++) // update EEPROM (write value if different)
-                                {
-                                    EEPROM.update(i, eeprom_content[i]);
-                                }
-    
-                                update_settings(); // update settings in RAM
-                                send_usb_packet(settings, 0x02, ack, 1);
+                                eeprom_content[0x12 + i] = cmd_payload[i];
                             }
+
+                            eeprom_content[0x1F] = calculate_checksum(eeprom_content, 0, 31); // re-calculate checksum
+
+                            for (uint8_t i = 0; i < 32; i++) // update EEPROM (write value if different)
+                            {
+                                EEPROM.update(i, eeprom_content[i]);
+                            }
+
+                            update_settings(); // update settings in RAM
+                            send_usb_packet(settings, 0x02, ack, 1);
                             break;
                         }
                         case 0x03: // autoupdate enable/disable
@@ -755,13 +779,12 @@ void handle_usb_data(void)
                             if (!payload_bytes)
                             {
                                 send_usb_packet(ok_error, error_payload_invalid_values, err, 1);
+                                break;
                             }
-                            else
-                            {
-                                if (cmd_payload[0] == 0x00) autoupdate = false;
-                                else autoupdate = true;
-                                send_usb_packet(settings, 0x03, cmd_payload, 1);
-                            }
+
+                            if (cmd_payload[0] == 0x00) autoupdate = false;
+                            else autoupdate = true;
+                            send_usb_packet(settings, 0x03, cmd_payload, 1);
                             break;
                         }
                         case 0x04: // service mode on/off
@@ -769,17 +792,16 @@ void handle_usb_data(void)
                             if (!payload_bytes)
                             {
                                 send_usb_packet(ok_error, error_payload_invalid_values, err, 1);
+                                break;
                             }
-                            else
+
+                            if (cmd_payload[0] == 0x00)
                             {
-                                if (cmd_payload[0] == 0x00)
-                                {
-                                    service_mode = false;
-                                    wpump_rampup(wpump_pwm); // restart water pump at saved speed
-                                }
-                                else service_mode = true;
-                                send_usb_packet(settings, 0x04, cmd_payload, 1);
+                                service_mode = false;
+                                change_wpump_speed(wpump_pwm); // restart water pump at saved speed
                             }
+                            else service_mode = true;
+                            send_usb_packet(settings, 0x04, cmd_payload, 1);
                             break;
                         }
                         case 0x05: // water pump on/off
@@ -787,30 +809,27 @@ void handle_usb_data(void)
                             if (!payload_bytes)
                             {
                                 send_usb_packet(ok_error, error_payload_invalid_values, err, 1);
+                                break;
                             }
-                            else
+
+                            if (service_mode)
                             {
-                                if (service_mode)
+                                send_usb_packet(settings, 0x05, cmd_payload, 1);
+                                
+                                if (cmd_payload[0] == 0x00)
                                 {
-                                    send_usb_packet(settings, 0x05, cmd_payload, 1);
-                                    
-                                    if (cmd_payload[0] == 0x00)
-                                    {
-                                        wpump_on = false;
-                                        digitalWrite(WATERPUMP_PIN, LOW);
-                                        digitalWrite(LED_PIN, HIGH); // LOW = ON, HIGH/HIGH-Z = OFF
-                                    }
-                                    else
-                                    {
-                                        wpump_on = true;
-                                        wpump_rampup(cmd_payload[0]);
-                                        digitalWrite(LED_PIN, LOW); // LOW = ON, HIGH/HIGH-Z = OFF
-                                    }
+                                    wpump_on = false;
+                                    change_wpump_speed(0);
                                 }
                                 else
                                 {
-                                    send_usb_packet(ok_error, error_internal, err, 1);
+                                    wpump_on = true;
+                                    change_wpump_speed(cmd_payload[0]);
                                 }
+                            }
+                            else
+                            {
+                                send_usb_packet(ok_error, error_internal, err, 1);
                             }
                             break;
                         }
@@ -861,84 +880,61 @@ void handle_usb_data(void)
                     {
                         case 0x01: // read EEPROM
                         {
-                            if (!payload_bytes || (payload_length < 4))
+                            // BUG: can't read the whole 1024 bytes in one go...
+                            
+                            if (payload_length < 4)
                             {
                                 send_usb_packet(ok_error, error_payload_invalid_values, err, 1);
+                                break;
                             }
-                            else
+
+                            uint16_t index = (cmd_payload[0] << 8) | cmd_payload[1]; // start index in EEPROM to read
+                            uint16_t count = (cmd_payload[2] << 8) | cmd_payload[3]; // number of bytes to read starting at index
+
+                            if ((index + count - 1) < 1024) // ATmega328P has 1024 bytes of EEPROM
                             {
-                                uint16_t index = (cmd_payload[0] << 8) | cmd_payload[1]; // start index in EEPROM to read
-                                uint16_t count = (cmd_payload[2] << 8) | cmd_payload[3]; // number of bytes to read starting at index
+                                uint8_t eeprom_values[count + 4]; // temporary array to store values + 2 address bytes and 2 count bytes at the beginning
+                                eeprom_values[0] = cmd_payload[0];
+                                eeprom_values[1] = cmd_payload[1];
+                                eeprom_values[2] = cmd_payload[2];
+                                eeprom_values[3] = cmd_payload[3];
 
-                                if ((index + count) <= 1024) // ATmega328P has 1024 bytes of EEPROM
+                                for (uint16_t i = 0; i < count; i++)
                                 {
-                                    if (count < 512) // Serial.write buffer limits one transmission below 1 kilobytes so a packet bigger than that has to be split apart
-                                    {
-                                        uint8_t eeprom_values[count + 4]; // temporary array to store values + 2 address bytes and 2 count bytes at the beginning
-                                        eeprom_values[0] = cmd_payload[0];
-                                        eeprom_values[1] = cmd_payload[1];
-                                        eeprom_values[2] = cmd_payload[2];
-                                        eeprom_values[3] = cmd_payload[3];
-        
-                                        for (uint16_t i = 0; i < count; i++)
-                                        {
-                                            eeprom_values[4 + i] = EEPROM.read(index + i);
-                                        }
-        
-                                        send_usb_packet(debug, 0x01, eeprom_values, count + 4);
-                                    }
-                                    else // split packet into 2 separate packets
-                                    {
-                                        uint8_t eeprom_values[512 + 4]; // temporary array to store values + 2 address bytes and 2 count bytes at the beginning
-                                        eeprom_values[0] = cmd_payload[0]; // first round, starting address is given in the payload
-                                        eeprom_values[1] = cmd_payload[1];
-                                        eeprom_values[2] = 0x02;
-                                        eeprom_values[3] = 0x00;
-        
-                                        for (uint16_t i = 0; i < 512; i++)
-                                        {
-                                            eeprom_values[4 + i] = EEPROM.read(index + i);
-                                        }
-        
-                                        send_usb_packet(debug, 0x01, eeprom_values, 512 + 4);
+                                    eeprom_values[4 + i] = EEPROM.read(index + i);
+                                }
 
-                                        eeprom_values[0] = 0x02; // second round, starting address is fixed
-                                        eeprom_values[1] = 0x00;
-                                        eeprom_values[2] = ((count - 512) >> 8) & 0xFF;
-                                        eeprom_values[3] = (count - 512) & 0xFF;
-        
-                                        for (uint16_t i = 512; i < count; i++)
-                                        {
-                                            eeprom_values[4 + i - 512] = EEPROM.read(index + i);
-                                        }
-        
-                                        send_usb_packet(debug, 0x01, eeprom_values, (count - 512) + 4);
-                                    }
-                                }
-                                else // otherwise at some point the read address will exceed EEPROM size
-                                {
-                                    send_usb_packet(ok_error, error_payload_invalid_values, err, 1);
-                                }
+                                send_usb_packet(debug, 0x01, eeprom_values, count + 4);
+                            }
+                            else // otherwise at some point the read address will exceed EEPROM size
+                            {
+                                send_usb_packet(ok_error, error_payload_invalid_values, err, 1);
                             }
                             break;
                         }
                         case 0x02: // write EEPROM
                         {
-                            if (!payload_bytes || (payload_length < 3))
+                            if (payload_length < 3)
                             {
                                 send_usb_packet(ok_error, error_payload_invalid_values, err, 1);
+                                break;
                             }
-                            else
-                            {
-                                uint16_t index = (cmd_payload[0] << 8) | cmd_payload[1]; // start index in EEPROM to write
-                                uint16_t count = payload_length - 2;
 
+                            uint16_t index = (cmd_payload[0] << 8) | cmd_payload[1]; // start index in EEPROM to write
+                            uint16_t count = payload_length - 2;
+
+                            if ((index + count) <= 1024) // ATmega328P has 1024 bytes of EEPROM
+                            {
                                 for (uint16_t i = 0; i < count; i++)
                                 {
                                     EEPROM.update(index + i, cmd_payload[2 + i]);
                                 }
 
                                 send_usb_packet(debug, 0x02, ack, 1);
+                            }
+                            else
+                            {
+                                send_usb_packet(ok_error, error_payload_invalid_values, err, 1);
                             }
                             break;
                         }
@@ -1016,7 +1012,7 @@ void setup()
         assembly_date[6] = 0x57;
         assembly_date[7] = 0x23;
         wpump_pwm = 0x7F; // 0x7F = 127 = 50%
-        wpump_rampup(wpump_pwm); // gradually turn on the water pump
+        change_wpump_speed(wpump_pwm); // gradually turn on the water pump
         wpump_ontime = 900000; // 15 minutes
         wpump_offtime = 900000; // 15 minutes
         if (wpump_on) wpump_interval = wpump_ontime;
@@ -1055,15 +1051,13 @@ void loop()
             {
                 wpump_on = false;
                 wpump_interval = wpump_offtime;
-                digitalWrite(WATERPUMP_PIN, LOW);
-                digitalWrite(LED_PIN, HIGH); // LOW = ON, HIGH/HIGH-Z = OFF
+                change_wpump_speed(0); // set zero speed to turn off
             }
             else
             {
                 wpump_on = true;
                 wpump_interval = wpump_ontime;
-                digitalWrite(LED_PIN, LOW); // LOW = ON, HIGH/HIGH-Z = OFF
-                wpump_rampup(wpump_pwm);
+                change_wpump_speed(wpump_pwm);
             }
         }
     }
