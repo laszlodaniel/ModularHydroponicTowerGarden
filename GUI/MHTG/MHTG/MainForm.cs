@@ -755,6 +755,9 @@ namespace MHTG
                                         case 0x06:
                                             Util.UpdateTextBox(CommunicationTextBox, "[RX->] Error: packet timeout occured", packet);
                                             break;
+                                        case 0xFD:
+                                            Util.UpdateTextBox(CommunicationTextBox, "[RX->] Error: not enough MCU RAM", packet);
+                                            break;
                                         case 0xFE:
                                             Util.UpdateTextBox(CommunicationTextBox, "[RX->] Error: internal error", packet);
                                             break;
