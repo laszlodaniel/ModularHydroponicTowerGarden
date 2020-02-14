@@ -108,8 +108,9 @@
             // 
             // UpdateFirmwareToolStripMenuItem
             // 
+            this.UpdateFirmwareToolStripMenuItem.Enabled = false;
             this.UpdateFirmwareToolStripMenuItem.Name = "UpdateFirmwareToolStripMenuItem";
-            this.UpdateFirmwareToolStripMenuItem.Size = new System.Drawing.Size(169, 22);
+            this.UpdateFirmwareToolStripMenuItem.Size = new System.Drawing.Size(180, 22);
             this.UpdateFirmwareToolStripMenuItem.Text = "Update firmware";
             this.UpdateFirmwareToolStripMenuItem.Click += new System.EventHandler(this.UpdateFirmwareToolStripMenuItem_Click);
             // 
@@ -124,8 +125,9 @@
             // ServiceModeToolStripMenuItem
             // 
             this.ServiceModeToolStripMenuItem.CheckOnClick = true;
+            this.ServiceModeToolStripMenuItem.Enabled = false;
             this.ServiceModeToolStripMenuItem.Name = "ServiceModeToolStripMenuItem";
-            this.ServiceModeToolStripMenuItem.Size = new System.Drawing.Size(169, 22);
+            this.ServiceModeToolStripMenuItem.Size = new System.Drawing.Size(180, 22);
             this.ServiceModeToolStripMenuItem.Text = "Service mode";
             this.ServiceModeToolStripMenuItem.CheckedChanged += new System.EventHandler(this.ServiceModeToolStripMenuItem_CheckedChanged);
             // 
@@ -605,7 +607,6 @@
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedSingle;
             this.MainMenuStrip = this.MenuStrip;
             this.MaximizeBox = false;
-            this.MinimizeBox = false;
             this.Name = "MainForm";
             this.Text = "Modular Hydroponic Tower Garden";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.MainForm_FormClosing);

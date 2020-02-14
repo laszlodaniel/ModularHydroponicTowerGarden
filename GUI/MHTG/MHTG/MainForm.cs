@@ -225,6 +225,8 @@ namespace MHTG
                                     TemperaturesGroupBox.Enabled = true;
                                     StatusButton.Enabled = true;
                                     ResetButton.Enabled = true;
+                                    UpdateFirmwareToolStripMenuItem.Enabled = true;
+                                    ServiceModeToolStripMenuItem.Enabled = true;
                                     Serial.DataReceived += new SerialDataReceivedEventHandler(SerialDataReceivedHandler);
                                     Serial.Write(HwFwInfoRequest, 0, HwFwInfoRequest.Length); // send a bunch of requests
                                     Serial.Write(ReadSettings, 0, ReadSettings.Length);
@@ -260,6 +262,8 @@ namespace MHTG
                     TemperaturesGroupBox.Enabled = false;
                     StatusButton.Enabled = false;
                     ResetButton.Enabled = false;
+                    UpdateFirmwareToolStripMenuItem.Enabled = false;
+                    ServiceModeToolStripMenuItem.Enabled = false;
                     Util.UpdateTextBox(CommunicationTextBox, "[INFO] Device disconnected (" + Serial.PortName + ")", null);
                     Serial.DataReceived -= new SerialDataReceivedEventHandler(SerialDataReceivedHandler);
                 }
