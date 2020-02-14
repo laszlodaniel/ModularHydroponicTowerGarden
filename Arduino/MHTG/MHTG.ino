@@ -36,7 +36,7 @@
 
 // Firmware date/time of compilation in 64-bit UNIX time
 // https://www.epochconverter.com/hex
-#define FW_DATE 0x000000005E4662E6
+#define FW_DATE 0x000000005E466634
 
 #define TEMP_EXT      A0 // external 10k NTC thermistor is connected to this analog pin
 #define TEMP_INT      A1 // internal 10k NTC thermistor is connected to this analog pin
@@ -588,7 +588,6 @@ void send_usb_packet(uint8_t command, uint8_t subdatacode, uint8_t *payloadbuff,
     uint16_t packet_length = payloadbufflen + 6;
     bool payload_bytes = true;
     uint8_t datacode = 0;
-    uint8_t counter = 0;
 
     // Check if there's enough RAM to store the whole packet
     if (free_ram() < (packet_length + 50)) // require +50 free bytes to be safe
