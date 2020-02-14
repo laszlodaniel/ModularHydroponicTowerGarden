@@ -36,7 +36,7 @@
 
 // Firmware date/time of compilation in 64-bit UNIX time
 // https://www.epochconverter.com/hex
-#define FW_DATE 0x000000005E466634
+#define FW_DATE 0x000000005E4667B7
 
 #define TEMP_EXT      A0 // external 10k NTC thermistor is connected to this analog pin
 #define TEMP_INT      A1 // internal 10k NTC thermistor is connected to this analog pin
@@ -405,104 +405,6 @@ void update_settings(void)
 }
 
 
-/*****************************************************************************
-Function: -
-Purpose:  -
-Note:     -
-******************************************************************************/
-void update_status(void)
-{
-    // Gather data and send back to laptop (water pump state, water pump pwm-level, remaining time until state change, temperatures)
-    uint8_t status_payload[14];
-    uint32_t remaining_time = last_wpump_millis + wpump_interval - current_millis;
-    uint8_t remaining_time_array[4];
-
-    if (!service_mode)
-    {
-        remaining_time_array[0] = (remaining_time >> 24) & 0xFF;
-        remaining_time_array[1] = (remaining_time >> 16) & 0xFF;
-        remaining_time_array[2] = (remaining_time >> 8) & 0xFF;
-        remaining_time_array[3] = remaining_time & 0xFF;
-    }
-    else
-    {
-        remaining_time_array[0] = 0;
-        remaining_time_array[1] = 0;
-        remaining_time_array[2] = 0;
-        remaining_time_array[3] = 0;
-    }
-    
-    status_payload[0] = 0;
-    if (wpump_on) sbi(status_payload[0], 0);
-    else cbi(status_payload[0], 0);
-    if (service_mode) sbi(status_payload[0], 1);
-    else cbi(status_payload[0], 1);
-    
-    status_payload[1] = wpump_pwm;
-    
-    status_payload[2] = remaining_time_array[0];
-    status_payload[3] = remaining_time_array[1];
-    status_payload[4] = remaining_time_array[2];
-    status_payload[5] = remaining_time_array[3];
-    
-    status_payload[6] = temperature_payload[0];
-    status_payload[7] = temperature_payload[1];
-    status_payload[8] = temperature_payload[2];
-    status_payload[9] = temperature_payload[3];
-    status_payload[10] = temperature_payload[4];
-    status_payload[11] = temperature_payload[5];
-    status_payload[12] = temperature_payload[6];
-    status_payload[13] = temperature_payload[7];
-    
-    send_usb_packet(status, ok, status_payload, 14);
-}
-
-
-/*************************************************************************
-Function: send_hwfw_info()
-Purpose:  gather hardware version/date, assembly date and firmware date
-          into an array and send through serial link
-Note:     -
-**************************************************************************/
-void send_hwfw_info(void)
-{
-    uint8_t ret[26];
-                                    
-    ret[0] = hw_version[0];
-    ret[1] = hw_version[1];
-    
-    ret[2] = hw_date[0];
-    ret[3] = hw_date[1];
-    ret[4] = hw_date[2];
-    ret[5] = hw_date[3];
-    ret[6] = hw_date[4];
-    ret[7] = hw_date[5];
-    ret[8] = hw_date[6];
-    ret[9] = hw_date[7];
-
-    ret[10] = assembly_date[0];
-    ret[11] = assembly_date[1];
-    ret[12] = assembly_date[2];
-    ret[13] = assembly_date[3];
-    ret[14] = assembly_date[4];
-    ret[15] = assembly_date[5];
-    ret[16] = assembly_date[6];
-    ret[17] = assembly_date[7];
-    
-    ret[18] = (FW_DATE >> 56) & 0xFF;
-    ret[19] = (FW_DATE >> 48) & 0xFF;
-    ret[20] = (FW_DATE >> 40) & 0xFF;
-    ret[21] = (FW_DATE >> 32) & 0xFF;
-    ret[22] = (FW_DATE >> 24) & 0xFF;
-    ret[23] = (FW_DATE >> 16) & 0xFF;
-    ret[24] = (FW_DATE >> 8) & 0xFF;
-    ret[25] = FW_DATE & 0xFF;
-
-    send_usb_packet(response, 0x02, ret, 26);
-    
-} // end of evaluate_eep_checksum
-
-
 /*************************************************************************
 Function: lcd_init()
 Purpose:  initialize LCD
@@ -638,6 +540,104 @@ void send_usb_packet(uint8_t command, uint8_t subdatacode, uint8_t *payloadbuff,
     }
 
 } // end of send_usb_packet
+
+
+/*****************************************************************************
+Function: -
+Purpose:  -
+Note:     -
+******************************************************************************/
+void update_status(void)
+{
+    // Gather data and send back to laptop (water pump state, water pump pwm-level, remaining time until state change, temperatures)
+    uint8_t status_payload[14];
+    uint32_t remaining_time = last_wpump_millis + wpump_interval - current_millis;
+    uint8_t remaining_time_array[4];
+
+    if (!service_mode)
+    {
+        remaining_time_array[0] = (remaining_time >> 24) & 0xFF;
+        remaining_time_array[1] = (remaining_time >> 16) & 0xFF;
+        remaining_time_array[2] = (remaining_time >> 8) & 0xFF;
+        remaining_time_array[3] = remaining_time & 0xFF;
+    }
+    else
+    {
+        remaining_time_array[0] = 0;
+        remaining_time_array[1] = 0;
+        remaining_time_array[2] = 0;
+        remaining_time_array[3] = 0;
+    }
+    
+    status_payload[0] = 0;
+    if (wpump_on) sbi(status_payload[0], 0);
+    else cbi(status_payload[0], 0);
+    if (service_mode) sbi(status_payload[0], 1);
+    else cbi(status_payload[0], 1);
+    
+    status_payload[1] = wpump_pwm;
+    
+    status_payload[2] = remaining_time_array[0];
+    status_payload[3] = remaining_time_array[1];
+    status_payload[4] = remaining_time_array[2];
+    status_payload[5] = remaining_time_array[3];
+    
+    status_payload[6] = temperature_payload[0];
+    status_payload[7] = temperature_payload[1];
+    status_payload[8] = temperature_payload[2];
+    status_payload[9] = temperature_payload[3];
+    status_payload[10] = temperature_payload[4];
+    status_payload[11] = temperature_payload[5];
+    status_payload[12] = temperature_payload[6];
+    status_payload[13] = temperature_payload[7];
+    
+    send_usb_packet(status, ok, status_payload, 14);
+}
+
+
+/*************************************************************************
+Function: send_hwfw_info()
+Purpose:  gather hardware version/date, assembly date and firmware date
+          into an array and send through serial link
+Note:     -
+**************************************************************************/
+void send_hwfw_info(void)
+{
+    uint8_t ret[26];
+                                    
+    ret[0] = hw_version[0];
+    ret[1] = hw_version[1];
+    
+    ret[2] = hw_date[0];
+    ret[3] = hw_date[1];
+    ret[4] = hw_date[2];
+    ret[5] = hw_date[3];
+    ret[6] = hw_date[4];
+    ret[7] = hw_date[5];
+    ret[8] = hw_date[6];
+    ret[9] = hw_date[7];
+
+    ret[10] = assembly_date[0];
+    ret[11] = assembly_date[1];
+    ret[12] = assembly_date[2];
+    ret[13] = assembly_date[3];
+    ret[14] = assembly_date[4];
+    ret[15] = assembly_date[5];
+    ret[16] = assembly_date[6];
+    ret[17] = assembly_date[7];
+    
+    ret[18] = (FW_DATE >> 56) & 0xFF;
+    ret[19] = (FW_DATE >> 48) & 0xFF;
+    ret[20] = (FW_DATE >> 40) & 0xFF;
+    ret[21] = (FW_DATE >> 32) & 0xFF;
+    ret[22] = (FW_DATE >> 24) & 0xFF;
+    ret[23] = (FW_DATE >> 16) & 0xFF;
+    ret[24] = (FW_DATE >> 8) & 0xFF;
+    ret[25] = FW_DATE & 0xFF;
+
+    send_usb_packet(response, 0x02, ret, 26);
+    
+} // end of evaluate_eep_checksum
 
 
 /*************************************************************************
