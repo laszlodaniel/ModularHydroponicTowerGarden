@@ -36,7 +36,7 @@
 
 // Firmware date/time of compilation in 64-bit UNIX time
 // https://www.epochconverter.com/hex
-#define FW_DATE 0x000000005E45719B
+#define FW_DATE 0x000000005E4662E6
 
 #define TEMP_EXT      A0 // external 10k NTC thermistor is connected to this analog pin
 #define TEMP_INT      A1 // internal 10k NTC thermistor is connected to this analog pin
@@ -544,6 +544,31 @@ uint8_t calculate_checksum(uint8_t *buff, uint16_t index, uint16_t bufflen)
 
 
 /*************************************************************************
+Function: free_ram()
+Purpose:  returns how many bytes exists between the end of the heap and 
+          the last allocated memory on the stack, so it is effectively 
+          how much the stack/heap can grow before they collide.
+**************************************************************************/
+uint16_t free_ram(void)
+{
+    extern int  __bss_end; 
+    extern int  *__brkval; 
+    uint16_t free_memory; 
+    
+    if((int)__brkval == 0)
+    {
+        free_memory = ((int)&free_memory) - ((int)&__bss_end); 
+    }
+    else 
+    {
+        free_memory = ((int)&free_memory) - ((int)__brkval); 
+    }
+    return free_memory; 
+
+} // end of free_ram
+
+
+/*************************************************************************
 Function: send_usb_packet()
 Purpose:  assemble and send data packet through serial link (UART0)
 Inputs:   - one source byte,
@@ -560,10 +585,23 @@ void send_usb_packet(uint8_t command, uint8_t subdatacode, uint8_t *payloadbuff,
 {
     // Calculate the length of the full packet:
     // PAYLOAD length + 1 SYNC byte + 2 LENGTH bytes + 1 DATA CODE byte + 1 SUB-DATA CODE byte + 1 CHECKSUM byte
-    uint16_t packet_length = payloadbufflen + 6;    
-    uint8_t packet[packet_length]; // create a temporary byte-array
+    uint16_t packet_length = payloadbufflen + 6;
     bool payload_bytes = true;
     uint8_t datacode = 0;
+    uint8_t counter = 0;
+
+    // Check if there's enough RAM to store the whole packet
+    if (free_ram() < (packet_length + 50)) // require +50 free bytes to be safe
+    {
+        uint8_t error[7] = { 0x3D, 0x00, 0x03, 0x8F, 0xFD, 0xFF, 0x8E }; // prepare the "not enough MCU RAM" error message
+        for (uint16_t i = 0; i < 7; i++)
+        {
+            Serial.write(error[i]);
+        }
+        return;
+    }
+
+    uint8_t packet[packet_length]; // create a temporary byte-array
 
     if (payloadbufflen <= 0) payload_bytes = false;
     else payload_bytes = true;
@@ -926,7 +964,7 @@ void handle_usb_data(void)
                             uint16_t index = (cmd_payload[0] << 8) | cmd_payload[1]; // start index in EEPROM to write
                             uint16_t count = payload_length - 2;
 
-                            if ((index + count) <= 1024) // ATmega328P has 1024 bytes of EEPROM
+                            if ((index + count - 1) < 1024) // ATmega328P has 1024 bytes of EEPROM
                             {
                                 for (uint16_t i = 0; i < count; i++)
                                 {
