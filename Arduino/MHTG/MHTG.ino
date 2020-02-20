@@ -36,7 +36,7 @@
 
 // Firmware date/time of compilation in 64-bit UNIX time
 // https://www.epochconverter.com/hex
-#define FW_DATE 0x000000005E4667B7
+#define FW_DATE 0x000000005E4EA7B1
 
 #define TEMP_EXT      A0 // external 10k NTC thermistor is connected to this analog pin
 #define TEMP_INT      A1 // internal 10k NTC thermistor is connected to this analog pin
@@ -47,6 +47,9 @@
 #define sbi(reg, bit) (reg) |=  (1 << (bit))
 #define cbi(reg, bit) (reg) &= ~(1 << (bit))
 #define ibi(reg, bit) (reg) ^=  (1 << (bit))
+
+#define to_uint16(hb, lb)               (uint16_t)(((uint8_t)hb << 8) | (uint8_t)lb)
+#define to_uint32(msb, hb, lb, lsb)     (uint32_t)(((uint32_t)msb << 24) | ((uint32_t)hb << 16) | ((uint32_t)lb << 8) | (uint32_t)lsb)
 
 // Packet related stuff
 // DATA CODE byte building blocks
@@ -392,15 +395,15 @@ void update_settings(void)
     assembly_date[7] = eeprom_content[0x11];
     wpump_pwm = eeprom_content[0x12];
     change_wpump_speed(wpump_pwm); // change water pump speed
-    wpump_ontime =  ((uint32_t)eeprom_content[0x13] << 24) | ((uint32_t)eeprom_content[0x14] << 16) | ((uint32_t)eeprom_content[0x15] << 8) | (uint32_t)eeprom_content[0x16];
-    wpump_offtime = ((uint32_t)eeprom_content[0x17] << 24) | ((uint32_t)eeprom_content[0x18] << 16) | ((uint32_t)eeprom_content[0x19] << 8) | (uint32_t)eeprom_content[0x1A];
+    wpump_ontime = to_uint32(eeprom_content[0x13], eeprom_content[0x14], eeprom_content[0x15], eeprom_content[0x16]);
+    wpump_offtime = to_uint32(eeprom_content[0x17], eeprom_content[0x18], eeprom_content[0x19], eeprom_content[0x1A]);
     
     if (wpump_on) wpump_interval = wpump_ontime;
     else wpump_interval = wpump_offtime;
     
     enabled_temperature_sensors = eeprom_content[0x1B];
     temperature_unit = eeprom_content[0x1C];
-    beta = ((uint16_t)eeprom_content[0x1D] << 8) | (uint16_t)eeprom_content[0x1E];
+    beta = to_uint16(eeprom_content[0x1D], eeprom_content[0x1E]);
     inv_beta = 1.00 / (float)beta;
 }
 
@@ -678,7 +681,7 @@ void handle_usb_data(void)
             length_lb = Serial.read(); // read second length byte
     
             // Calculate how much more bytes should we read by combining the two length bytes into a word.
-            bytes_to_read = (length_hb << 8) + length_lb + 1; // +1 CHECKSUM byte
+            bytes_to_read = to_uint16(length_hb, length_lb) + 1; // +1 CHECKSUM byte
             
             // Calculate the exact size of the payload.
             payload_length = bytes_to_read - 3; // in this case we have to be careful not to count data code byte, sub-data code byte and checksum byte
@@ -928,8 +931,8 @@ void handle_usb_data(void)
                                 break;
                             }
 
-                            uint16_t index = (cmd_payload[0] << 8) | cmd_payload[1]; // start index in EEPROM to read
-                            uint16_t count = (cmd_payload[2] << 8) | cmd_payload[3]; // number of bytes to read starting at index
+                            uint16_t index = to_uint16(cmd_payload[0], cmd_payload[1]); // start index in EEPROM to read
+                            uint16_t count = to_uint16(cmd_payload[2], cmd_payload[3]); // number of bytes to read starting at index
 
                             if ((index + count - 1) < 1024) // ATmega328P has 1024 bytes of EEPROM
                             {
@@ -960,7 +963,7 @@ void handle_usb_data(void)
                                 break;
                             }
 
-                            uint16_t index = (cmd_payload[0] << 8) | cmd_payload[1]; // start index in EEPROM to write
+                            uint16_t index = to_uint16(cmd_payload[0], cmd_payload[1]); // start index in EEPROM to write
                             uint16_t count = payload_length - 2;
 
                             if ((index + count - 1) < 1024) // ATmega328P has 1024 bytes of EEPROM

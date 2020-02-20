@@ -118,7 +118,7 @@
             // 
             this.ShowDebugToolsToolStripMenuItem.CheckOnClick = true;
             this.ShowDebugToolsToolStripMenuItem.Name = "ShowDebugToolsToolStripMenuItem";
-            this.ShowDebugToolsToolStripMenuItem.Size = new System.Drawing.Size(169, 22);
+            this.ShowDebugToolsToolStripMenuItem.Size = new System.Drawing.Size(180, 22);
             this.ShowDebugToolsToolStripMenuItem.Text = "Show debug tools";
             this.ShowDebugToolsToolStripMenuItem.CheckedChanged += new System.EventHandler(this.ShowDebugToolsToolStripMenuItem_CheckedChanged);
             // 

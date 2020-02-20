@@ -100,9 +100,9 @@ namespace MHTG
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
+            Application.DoEvents();
             if (DeviceFound) ConnectButton.PerformClick(); // disconnect first
             if (Serial.IsOpen) Serial.Close();
-            Application.DoEvents();
         }
 
         private void TimeoutHandler(object source, ElapsedEventArgs e)
@@ -278,7 +278,15 @@ namespace MHTG
             // This approach enables reading multiple broken transmissions
             for (int i = 0; i < DataLength; i++)
             {
-                bufferlist.Add((byte)sp.ReadByte());
+                try
+                {
+                    bufferlist.Add((byte)sp.ReadByte());
+                }
+                catch
+                {
+                    Util.UpdateTextBox(CommunicationTextBox, "[INFO] Serial read error", null);
+                    break;
+                }
             }
 
             // Multiple packets are handled one after another in this while-loop
@@ -970,15 +978,11 @@ namespace MHTG
 
         private void AboutToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (about == null || !about.Visible)
+            about = new AboutForm(this)
             {
-                about = new AboutForm(this);
-                about.Show();
-            }
-            else
-            {
-                about.BringToFront();
-            }
+                StartPosition = FormStartPosition.CenterParent
+            };
+            about.ShowDialog();
         }
 
         private void ShowDebugToolsToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
@@ -987,13 +991,11 @@ namespace MHTG
             {
                 DebugGroupBox.Visible = true;
                 this.Size = new Size(780, 650); // resize form to expanded view
-                this.CenterToScreen(); // put window at the center of the screen
             }
             else
             {
                 DebugGroupBox.Visible = false;
                 this.Size = new Size(405, 650); // resize form to collapsed view
-                this.CenterToScreen(); // put window at the center of the screen
             }
         }
 
