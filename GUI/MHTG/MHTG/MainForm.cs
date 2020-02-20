@@ -991,11 +991,13 @@ namespace MHTG
             {
                 DebugGroupBox.Visible = true;
                 this.Size = new Size(780, 650); // resize form to expanded view
+                this.CenterToScreen();
             }
             else
             {
                 DebugGroupBox.Visible = false;
                 this.Size = new Size(405, 650); // resize form to collapsed view
+                this.CenterToScreen();
             }
         }
 
