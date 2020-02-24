@@ -18,9 +18,7 @@ namespace MHTG
         public bool SerialPortAvailable = false;
         public bool Timeout = false;
         public bool DeviceFound = false;
-        public byte[] buffer = new byte[2048];
         public List<byte> bufferlist = new List<byte>();
-        public byte ConnectionCounter = 0;
 
         public byte WaterPumpSpeed = 0;
         public uint WaterPumpOnTime = 0;
@@ -31,6 +29,7 @@ namespace MHTG
         public float ExternalTemperature = 0;
         public float InternalTemperature = 0;
 
+        public string SelectedPort = String.Empty;
         public static string UpdatePort = String.Empty;
         public static UInt64 OldFWUNIXTime = 0;
         public static UInt64 NewFWUNIXTime = 0;
@@ -120,16 +119,38 @@ namespace MHTG
                 COMPortsComboBox.Items.AddRange(ports);
                 SerialPortAvailable = true;
                 ConnectButton.Enabled = true;
+
+                if (SelectedPort == String.Empty) // if no port has been selected
+                {
+                    COMPortsComboBox.SelectedIndex = 0; // select first available port
+                    SelectedPort = COMPortsComboBox.Text;
+                }
+                else
+                {
+                    try
+                    {
+                        COMPortsComboBox.SelectedIndex = COMPortsComboBox.Items.IndexOf(SelectedPort);
+                    }
+                    catch
+                    {
+                        COMPortsComboBox.SelectedIndex = 0;
+                    }
+                }
             }
             else
             {
                 COMPortsComboBox.Items.Add("N/A");
                 SerialPortAvailable = false;
                 ConnectButton.Enabled = false;
+                COMPortsComboBox.SelectedIndex = 0; // select "N/A"
+                SelectedPort = String.Empty;
                 Util.UpdateTextBox(CommunicationTextBox, "[INFO] No device available", null);
             }
+        }
 
-            COMPortsComboBox.SelectedIndex = 0; // select first available item
+        private void COMPortsComboBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            SelectedPort = COMPortsComboBox.Text;
         }
 
         private void RefreshButton_Click(object sender, EventArgs e)
@@ -150,6 +171,9 @@ namespace MHTG
 
                 if (SerialPortAvailable)
                 {
+                    byte[] buffer = new byte[2048];
+                    byte ConnectionCounter = 0;
+
                     while (ConnectionCounter < 5) // try connecting to the device 5 times, then give up
                     {
                         ConnectButton.Enabled = false; // no double-click
@@ -212,7 +236,7 @@ namespace MHTG
                             }
                             else
                             {
-                                DeviceFound = Util.CompareArrays(buffer, ExpectedHandshake, 0, 10);
+                                DeviceFound = Util.CompareArrays(buffer, ExpectedHandshake, 0, ExpectedHandshake.Length);
 
                                 if (DeviceFound)
                                 {

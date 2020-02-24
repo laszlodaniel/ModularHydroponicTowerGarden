@@ -110,7 +110,7 @@
             // 
             this.UpdateFirmwareToolStripMenuItem.Enabled = false;
             this.UpdateFirmwareToolStripMenuItem.Name = "UpdateFirmwareToolStripMenuItem";
-            this.UpdateFirmwareToolStripMenuItem.Size = new System.Drawing.Size(180, 22);
+            this.UpdateFirmwareToolStripMenuItem.Size = new System.Drawing.Size(169, 22);
             this.UpdateFirmwareToolStripMenuItem.Text = "Update firmware";
             this.UpdateFirmwareToolStripMenuItem.Click += new System.EventHandler(this.UpdateFirmwareToolStripMenuItem_Click);
             // 
@@ -118,7 +118,7 @@
             // 
             this.ShowDebugToolsToolStripMenuItem.CheckOnClick = true;
             this.ShowDebugToolsToolStripMenuItem.Name = "ShowDebugToolsToolStripMenuItem";
-            this.ShowDebugToolsToolStripMenuItem.Size = new System.Drawing.Size(180, 22);
+            this.ShowDebugToolsToolStripMenuItem.Size = new System.Drawing.Size(169, 22);
             this.ShowDebugToolsToolStripMenuItem.Text = "Show debug tools";
             this.ShowDebugToolsToolStripMenuItem.CheckedChanged += new System.EventHandler(this.ShowDebugToolsToolStripMenuItem_CheckedChanged);
             // 
@@ -127,7 +127,7 @@
             this.ServiceModeToolStripMenuItem.CheckOnClick = true;
             this.ServiceModeToolStripMenuItem.Enabled = false;
             this.ServiceModeToolStripMenuItem.Name = "ServiceModeToolStripMenuItem";
-            this.ServiceModeToolStripMenuItem.Size = new System.Drawing.Size(180, 22);
+            this.ServiceModeToolStripMenuItem.Size = new System.Drawing.Size(169, 22);
             this.ServiceModeToolStripMenuItem.Text = "Service mode";
             this.ServiceModeToolStripMenuItem.CheckedChanged += new System.EventHandler(this.ServiceModeToolStripMenuItem_CheckedChanged);
             // 
@@ -494,6 +494,7 @@
             this.COMPortsComboBox.Name = "COMPortsComboBox";
             this.COMPortsComboBox.Size = new System.Drawing.Size(60, 23);
             this.COMPortsComboBox.TabIndex = 1;
+            this.COMPortsComboBox.SelectedIndexChanged += new System.EventHandler(this.COMPortsComboBox_SelectedIndexChanged);
             // 
             // ConnectButton
             // 
