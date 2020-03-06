@@ -1,7 +1,7 @@
 # ModularHydroponicTowerGarden
 A modular 3D-printable hydroponic tower garden with Arduino compatible water pump controller.
 
-**3DPrint** folder contains the STL-files to print tower parts.
+**3DPrint** ~~folder contains the STL-files to print tower parts.~~ [STL-files are hosted on Thingiverse](https://www.thingiverse.com/thing:3405964)
 
 **Arduino** folder contains the source code and compiled binaries for the water pump controller written in Arduino IDE 1.8.7.
 
