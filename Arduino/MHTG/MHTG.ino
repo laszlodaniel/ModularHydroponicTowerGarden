@@ -36,11 +36,11 @@
 
 // Firmware date/time of compilation in 64-bit UNIX time
 // https://www.epochconverter.com/hex
-#define FW_DATE 0x000000005E4EA7B1
+#define FW_DATE 0x000000005E628281
 
 #define TEMP_EXT      A0 // external 10k NTC thermistor is connected to this analog pin
 #define TEMP_INT      A1 // internal 10k NTC thermistor is connected to this analog pin
-#define LED_PIN       4  // red LED
+#define RED_LED_PIN   4  // red LED
 #define WATERPUMP_PIN 9  // waterpump pwm output
 
 // Set (1), clear (0) and invert (1->0; 0->1) bit in a register or variable easily
@@ -117,6 +117,10 @@ uint8_t avr_signature[3];
 volatile bool mode_button_pressed = false;
 bool autoupdate = true;
 bool service_mode = false;
+uint16_t service_mode_blinking_interval = 500; // ms
+uint16_t led_blink_duration = 100; // ms
+uint32_t previous_led_blink = 0; // ms
+uint32_t red_led_ontime = 0; // ms
 
 // Packet related variables
 // Timeout values for packets
@@ -138,30 +142,30 @@ typedef union {
 
 
 /*****************************************************************************
-Function: -
-Purpose:  -
+Function: get_temps()
+Purpose:  measures and converts the analog voltage present on A0 and A1 pins
 Note:     -
 ******************************************************************************/
 void get_temps(float *te, float *ti)
 {
-    float Ke, Ce, Fe; // external variables
-    float Ki, Ci, Fi; // internal variables
+    float Ke, Ce, Fe; // external temperature variables
+    float Ki, Ci, Fi; // internal temperature variables
 
     Ve = 0; // start with zero
     Vi = 0; // start with zero
 
-    for (uint16_t i = 0; i < 1000; i++) // measure analog voltage quickly 1000 times and add results together
+    for (uint16_t i = 0; i < 500; i++) // measure analog voltage quickly 500 times and add results together
     {
         Ve += analogRead(TEMP_EXT);
     }
 
-    for (uint16_t i = 0; i < 1000; i++) // measure analog voltage quickly 1000 times and add results together
+    for (uint16_t i = 0; i < 500; i++) // measure analog voltage quickly 500 times and add results together
     {
         Vi += analogRead(TEMP_INT);
     }
 
-    Ve /= 1000; // calculate average value
-    Vi /= 1000; // calculate average value
+    Ve /= 500; // calculate average value
+    Vi /= 500; // calculate average value
 
     // Calculate external temperature using this equation involving the thermistor's beta property
     Ke = 1.00 / (inv_t0 + inv_beta * (log(1023.00 / (float)Ve - 1.00))); // Kelvin
@@ -268,40 +272,30 @@ void get_temps(float *te, float *ti)
             break;
         }
     }
-}
+    
+} // end of get_temps
 
 
 /*****************************************************************************
-Function: -
-Purpose:  -
-Note:     -
-******************************************************************************/
-void update_lcd(void)
-{
-    // TODO
-}
-
-
-/*****************************************************************************
-Function: -
-Purpose:  -
-Note:     -
+Function: handle_mode_button()
+Purpose:  sets a flag when the mode button is pressed
+Note:     the loop-function processes this flag
 ******************************************************************************/
 void handle_mode_button(void)
 {
     ATOMIC_BLOCK(ATOMIC_FORCEON)
     {
         mode_button_pressed = true;
-        //wpump_pwm += 20;
-        if (wpump_on) analogWrite(WATERPUMP_PIN, wpump_pwm);
     }
-}
+    
+} // end of handle_mode_button
 
 
 /*****************************************************************************
-Function: -
-Purpose:  -
-Note:     it's easier on the power supply if the pump speed is changed slowly
+Function: change_wpump_speed()
+Purpose:  gradually changes water pump speed from current to target value
+Note:     it's easier on the power supply if the speed is changed slowly,
+          default pwm-frequency is 490.2 Hz (PB1/D9 pin uses Timer 1)
 ******************************************************************************/
 void change_wpump_speed(uint8_t new_wpump_pwm)
 {
@@ -310,7 +304,7 @@ void change_wpump_speed(uint8_t new_wpump_pwm)
         if (new_wpump_pwm == 0)
         {
             digitalWrite(WATERPUMP_PIN, LOW);
-            digitalWrite(LED_PIN, HIGH); // turn off indicator LED
+            digitalWrite(RED_LED_PIN, HIGH); // turn off indicator LED
             old_wpump_pwm = 0;
             return;
         }
@@ -333,15 +327,16 @@ void change_wpump_speed(uint8_t new_wpump_pwm)
             }
         }
     
-        digitalWrite(LED_PIN, LOW); // turn on indicator LED
+        digitalWrite(RED_LED_PIN, LOW); // turn on indicator LED
         old_wpump_pwm = new_wpump_pwm; // save last set pwm-level
     }
-}
+    
+} // end of change_wpump_speed
 
 
 /*****************************************************************************
-Function: -
-Purpose:  -
+Function: update_timestamp()
+Purpose:  saves the current elapes milliseconds in the target byte-array
 Note:     -
 ******************************************************************************/
 void update_timestamp(uint8_t *target)
@@ -351,7 +346,8 @@ void update_timestamp(uint8_t *target)
     target[1] = (mcu_current_millis >> 16) & 0xFF;
     target[2] = (mcu_current_millis >> 8) & 0xFF;
     target[3] = mcu_current_millis & 0xFF;
-}
+    
+} // end of update_timestamp
 
 
 /*****************************************************************************
@@ -369,8 +365,8 @@ void read_avr_signature(uint8_t *target)
 
 
 /*****************************************************************************
-Function: -
-Purpose:  -
+Function: update_settings()
+Purpose:  takes values from the temporary eeprom_content array and updates variables
 Note:     -
 ******************************************************************************/
 void update_settings(void)
@@ -394,23 +390,62 @@ void update_settings(void)
     assembly_date[6] = eeprom_content[0x10];
     assembly_date[7] = eeprom_content[0x11];
     wpump_pwm = eeprom_content[0x12];
-    change_wpump_speed(wpump_pwm); // change water pump speed
     wpump_ontime = to_uint32(eeprom_content[0x13], eeprom_content[0x14], eeprom_content[0x15], eeprom_content[0x16]);
     wpump_offtime = to_uint32(eeprom_content[0x17], eeprom_content[0x18], eeprom_content[0x19], eeprom_content[0x1A]);
+
+    if (!service_mode)
+    {
+        if ((wpump_ontime == 0) && (wpump_offtime == 0))
+        {
+            wpump_interval = 0;
+            change_wpump_speed(0);
+            wpump_on = false;
+        }
+        else
+        {
+            if (wpump_offtime == 0) // permanently turn on water pump
+            {
+                wpump_interval = 0;
+                wpump_on = true;
+                change_wpump_speed(wpump_pwm);
+            }
     
-    if (wpump_on) wpump_interval = wpump_ontime;
-    else wpump_interval = wpump_offtime;
+            if (wpump_ontime == 0) // permanently turn off water pump
+            {
+                wpump_interval = 0;
+                change_wpump_speed(0);
+                wpump_on = false;
+            }
     
+            if ((wpump_ontime != 0) && (wpump_offtime != 0))
+            {
+                if (wpump_on)
+                {
+                    wpump_interval = wpump_ontime;
+                    wpump_on = true;
+                    change_wpump_speed(wpump_pwm);
+                }
+                else
+                {
+                    wpump_interval = wpump_offtime;
+                    change_wpump_speed(0);
+                    wpump_on = false;
+                }
+            }
+        }
+    }
+
     enabled_temperature_sensors = eeprom_content[0x1B];
     temperature_unit = eeprom_content[0x1C];
     beta = to_uint16(eeprom_content[0x1D], eeprom_content[0x1E]);
     inv_beta = 1.00 / (float)beta;
-}
+    
+} // end of update_settings
 
 
 /*************************************************************************
 Function: lcd_init()
-Purpose:  initialize LCD
+Purpose:  initializes LCD
 Note:     -
 **************************************************************************/
 void lcd_init(void)
@@ -432,9 +467,22 @@ void lcd_init(void)
 
 
 /*****************************************************************************
-Function: -
+Function: update_lcd()
 Purpose:  -
 Note:     -
+******************************************************************************/
+void update_lcd(void)
+{
+    // TODO
+    
+} // end of update_lcd
+
+
+/*****************************************************************************
+Function: calculate_checksum()
+Purpose:  calculates checksum in a given buffer with specified length
+Note:     index = first byte in the array to include in calculation
+          bufflen = full length of the buffer
 ******************************************************************************/
 uint8_t calculate_checksum(uint8_t *buff, uint16_t index, uint16_t bufflen)
 {
@@ -475,7 +523,7 @@ uint16_t free_ram(void)
 
 /*************************************************************************
 Function: send_usb_packet()
-Purpose:  assemble and send data packet through serial link (UART0)
+Purpose:  assembles and sends data packet through serial link (UART0)
 Inputs:   - one source byte,
           - one target byte,
           - one datacode command value byte, these three are used to calculate the DATA CODE byte
@@ -546,8 +594,8 @@ void send_usb_packet(uint8_t command, uint8_t subdatacode, uint8_t *payloadbuff,
 
 
 /*****************************************************************************
-Function: -
-Purpose:  -
+Function: update_status()
+Purpose:  sends a status packet through serial link
 Note:     -
 ******************************************************************************/
 void update_status(void)
@@ -559,12 +607,22 @@ void update_status(void)
 
     if (!service_mode)
     {
-        remaining_time_array[0] = (remaining_time >> 24) & 0xFF;
-        remaining_time_array[1] = (remaining_time >> 16) & 0xFF;
-        remaining_time_array[2] = (remaining_time >> 8) & 0xFF;
-        remaining_time_array[3] = remaining_time & 0xFF;
+        if (wpump_interval > 0)
+        {
+            remaining_time_array[0] = (remaining_time >> 24) & 0xFF;
+            remaining_time_array[1] = (remaining_time >> 16) & 0xFF;
+            remaining_time_array[2] = (remaining_time >> 8) & 0xFF;
+            remaining_time_array[3] = remaining_time & 0xFF;
+        }
+        else
+        {
+            remaining_time_array[0] = 0;
+            remaining_time_array[1] = 0;
+            remaining_time_array[2] = 0;
+            remaining_time_array[3] = 0;
+        }
     }
-    else
+    else if (service_mode)
     {
         remaining_time_array[0] = 0;
         remaining_time_array[1] = 0;
@@ -595,12 +653,13 @@ void update_status(void)
     status_payload[13] = temperature_payload[7];
     
     send_usb_packet(status, ok, status_payload, 14);
-}
+    
+} // end of update_status
 
 
 /*************************************************************************
 Function: send_hwfw_info()
-Purpose:  gather hardware version/date, assembly date and firmware date
+Purpose:  gathers hardware version/date, assembly date and firmware date
           into an array and send through serial link
 Note:     -
 **************************************************************************/
@@ -645,7 +704,7 @@ void send_hwfw_info(void)
 
 /*************************************************************************
 Function: handle_usb_data()
-Purpose:  handle USB commands coming from an external computer
+Purpose:  handles USB commands coming from an external computer
 Note:     [ SYNC | LENGTH_HB | LENGTH_LB | DATACODE | SUBDATACODE | <?PAYLOAD?> | CHECKSUM ]
 **************************************************************************/
 void handle_usb_data(void)
@@ -859,16 +918,10 @@ void handle_usb_data(void)
                             {
                                 send_usb_packet(settings, 0x05, cmd_payload, 1);
                                 
-                                if (cmd_payload[0] == 0x00)
-                                {
-                                    wpump_on = false;
-                                    change_wpump_speed(0);
-                                }
-                                else
-                                {
-                                    wpump_on = true;
-                                    change_wpump_speed(cmd_payload[0]);
-                                }
+                                if (cmd_payload[0] == 0x00) wpump_on = false;
+                                else wpump_on = true;
+                                
+                                change_wpump_speed(cmd_payload[0]);
                             }
                             else
                             {
@@ -1013,11 +1066,13 @@ void setup()
 {
     sei(); // enable interrupts
     Serial.begin(250000);
-    pinMode(LED_PIN, OUTPUT);
+    pinMode(RED_LED_PIN, OUTPUT);
+    digitalWrite(RED_LED_PIN, HIGH); // turn off red LED
     pinMode(WATERPUMP_PIN, OUTPUT);
     attachInterrupt(digitalPinToInterrupt(2), handle_mode_button, FALLING);
 
     read_avr_signature(avr_signature); // read AVR signature bytes that identifies the microcontroller
+    lcd_init();
 
     // Read first 32 bytes of the internal EEPROM
     for (uint8_t i = 0; i < 32; i++)
@@ -1064,10 +1119,9 @@ void setup()
         temperature_unit = 1; // Celsius = 1, Fahrenheit = 2, Kelvin = 4
         beta = 3950;
         inv_beta = 1.00 / (float)beta;
+        wpump_on = true;
     }
 
-    lcd_init();
-    wpump_on = true;
     wdt_enable(WDTO_4S); // reset program if it hangs for more than 4 seconds
     send_usb_packet(reset, 0x01, ack, 1); // confirm device readiness
 }
@@ -1076,32 +1130,24 @@ void setup()
 void loop()
 {
     wdt_reset(); // reset watchdog timer to 0 seconds so no accidental restart occurs
-    current_millis = millis(); // check current time
     handle_usb_data();
-    
-    if (mode_button_pressed)
-    {
-        mode_button_pressed = false; // re-arm
-        // TODO
-    }
-    
-    if ((current_millis - last_wpump_millis >= wpump_interval) && (current_millis > last_wpump_millis))
+    current_millis = millis(); // check current time
+
+    if ((current_millis - last_wpump_millis >= wpump_interval) && (current_millis > last_wpump_millis) && (wpump_ontime != 0) && (wpump_offtime != 0))
     {
         last_wpump_millis = current_millis; // save the last time we were here
-        if (!service_mode)
+        
+        if (wpump_on)
         {
-            if (wpump_on)
-            {
-                wpump_interval = wpump_offtime;
-                change_wpump_speed(0); // set zero speed to turn off
-                wpump_on = false;
-            }
-            else
-            {
-                wpump_on = true;
-                wpump_interval = wpump_ontime;
-                change_wpump_speed(wpump_pwm);
-            }
+            wpump_interval = wpump_offtime;
+            change_wpump_speed(0); // set zero speed to turn off
+            wpump_on = false;
+        }
+        else
+        {
+            wpump_on = true;
+            wpump_interval = wpump_ontime;
+            if (!service_mode) change_wpump_speed(wpump_pwm);
         }
     }
     else if (current_millis < last_wpump_millis) // be prepared if the millis counter overflows every month or so
@@ -1117,11 +1163,53 @@ void loop()
         if (autoupdate) // update external devices regularly (USB, LCD)
         {
             update_status();
-            update_lcd();
+            update_lcd(); // TODO
         }
     }
     else if (current_millis < last_update_millis) // be prepared if the millis counter overflows every month or so
     {
         last_update_millis = 0;
+    }
+
+    if (mode_button_pressed) // handle mode-button press
+    {
+        mode_button_pressed = false; // re-arm
+
+        if (!service_mode)
+        {
+            service_mode = true; // enter service mode
+            
+            if (wpump_on)
+            {
+                change_wpump_speed(0); // turn off water pump
+            }
+        }
+        else
+        {
+            service_mode = false; // exit service mode
+
+            if (wpump_on) // if water pump is on according to the timer
+            {
+                wpump_on = true;
+                change_wpump_speed(wpump_pwm); // resume water pump activity
+            }
+
+            if (!wpump_on) digitalWrite(RED_LED_PIN, HIGH); // turn off red LED is this condition catches it during blinking
+        }
+    }
+
+    if (service_mode) // blink red LED when in service mode
+    {   
+        if (current_millis - previous_led_blink >= service_mode_blinking_interval)
+        {
+            previous_led_blink = current_millis; // save current time
+            digitalWrite(RED_LED_PIN, LOW); // turn on red LED
+            red_led_ontime = current_millis; // save time when red LED was turned on
+        }
+
+        if (current_millis - red_led_ontime >= led_blink_duration)
+        {
+            digitalWrite(RED_LED_PIN, HIGH); // turn off red LED
+        }
     }
 }

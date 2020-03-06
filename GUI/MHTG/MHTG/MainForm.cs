@@ -39,6 +39,7 @@ namespace MHTG
         public static string USBBinaryLogFilename;
 
         public bool WaterPumpState = false;
+        public bool ServiceMode = false;
 
         public byte[] ResetDevice = new byte[] { 0x3D, 0x00, 0x02, 0x00, 0x00, 0x02 };
         public byte[] HandshakeRequest = new byte[] { 0x3D, 0x00, 0x02, 0x01, 0x01, 0x04 };
@@ -386,30 +387,33 @@ namespace MHTG
                                         byte WaterPumpPercentValue = (byte)(Math.Round((float)(Payload[1] + 1) / 256 * 100));
                                         string WaterPumpPercentLevel = WaterPumpPercentValue.ToString("0") + "%";
                                         string ServiceModeString = string.Empty;
+                                        TimeSpan RemainingTimeMillis = TimeSpan.FromMilliseconds(Payload[2] << 24 | Payload[3] << 16 | Payload[4] << 8 | Payload[5]);
+                                        DateTime RemainingTime = DateTime.Today.Add(RemainingTimeMillis);
+                                        string RemainingTimeString = RemainingTime.ToString("HH:mm:ss");
 
-                                        if ((Payload[0] & 0x01) == 0x01)
+                                        if ((Payload[0] & 0x01) == 0x01) WaterPumpState = true; // enabled
+                                        else WaterPumpState = false; // disabled
+
+                                        if (WaterPumpState)
                                         {
-                                            WaterPumpStateString = "on @ " + WaterPumpPercentLevel;
-                                            WaterPumpState = true;
+                                            if (WaterPumpOnTime > 0) WaterPumpStateString = "on @ " + WaterPumpPercentLevel;
+                                            else WaterPumpStateString = "off";
                                         }
                                         else
                                         {
                                             WaterPumpStateString = "off";
                                             WaterPumpState = false;
                                         }
-                                        
-                                        if (((Payload[0] >> 1) & 0x01) == 0x01)
+
+                                        if (((Payload[0] >> 1) & 0x01) == 0x01) ServiceMode = true;
+                                        else ServiceMode = false;
+
+                                        if (ServiceMode)
                                         {
                                             ServiceModeString = "enabled";
+                                            WaterPumpStateString = "off";
                                         }
-                                        else
-                                        {
-                                            ServiceModeString = "disabled";
-                                        }
-
-                                        TimeSpan RemainingTimeMillis = TimeSpan.FromMilliseconds(Payload[2] << 24 | Payload[3] << 16 | Payload[4] << 8 | Payload[5]);
-                                        DateTime RemainingTime = DateTime.Today.Add(RemainingTimeMillis);
-                                        string RemainingTimeString = RemainingTime.ToString("HH:mm:ss");
+                                        else ServiceModeString = "disabled";
 
                                         ExternalTemperature = BitConverter.ToSingle(new byte[4] { Payload[6], Payload[7], Payload[8], Payload[9] }, 0);
                                         InternalTemperature = BitConverter.ToSingle(new byte[4] { Payload[10], Payload[11], Payload[12], Payload[13] }, 0);
@@ -852,7 +856,7 @@ namespace MHTG
             else WaterPumpSpeed = (byte)((WaterPumpSpeedTrackBar.Value * 256 / 100) - 1); // convert percent to PWM value (0-255)
 
             uint.TryParse(WaterPumpOnTimeTextBox.Text, out WaterPumpOnTime); // 0 if failed
-            if (WaterPumpOnTime <= 0) WaterPumpOnTime = 15; // minutes default
+            if (WaterPumpOnTime < 0) WaterPumpOnTime = 15; // minutes default
             if (WaterPumpOnTime > 71582) WaterPumpOnTime = 71582; // maximum value
             WaterPumpOnTime *= 60 * 1000; // convert minutes to milliseconds
 
@@ -863,7 +867,7 @@ namespace MHTG
             WaterPumpOnTimeArray[3] = (byte)(WaterPumpOnTime & 0xFF);
 
             uint.TryParse(WaterPumpOffTimeTextBox.Text, out WaterPumpOffTime); // 0 if failed
-            if (WaterPumpOffTime <= 0) WaterPumpOffTime = 15; // minutes default
+            if (WaterPumpOffTime < 0) WaterPumpOffTime = 15; // minutes default
             if (WaterPumpOffTime > 71582) WaterPumpOffTime = 71582; // maximum value
             WaterPumpOffTime *= 60 * 1000; // convert minutes to milliseconds
 
@@ -887,7 +891,7 @@ namespace MHTG
                 case 2: // Kelvin
                     TemperatureUnit = 4;
                     break;
-                default:
+                default: // Celsius
                     TemperatureUnit = 1;
                     break;
             }
