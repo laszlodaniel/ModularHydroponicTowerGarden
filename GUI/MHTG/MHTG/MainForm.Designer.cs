@@ -76,6 +76,10 @@
             this.DebugGroupBox = new System.Windows.Forms.GroupBox();
             this.WaterPumpOnOffCheckBox = new System.Windows.Forms.CheckBox();
             this.GetStatusUpdatesCheckBox = new System.Windows.Forms.CheckBox();
+            this.PWMFrequencyLabel = new System.Windows.Forms.Label();
+            this.PWMFrequencyApplyButton = new System.Windows.Forms.Button();
+            this.PWMFrequencyTextBox = new System.Windows.Forms.TextBox();
+            this.HzLabel = new System.Windows.Forms.Label();
             this.MenuStrip.SuspendLayout();
             this.CommunicationGroupBox.SuspendLayout();
             this.SettingsGroupBox.SuspendLayout();
@@ -559,6 +563,10 @@
             // 
             // DebugGroupBox
             // 
+            this.DebugGroupBox.Controls.Add(this.HzLabel);
+            this.DebugGroupBox.Controls.Add(this.PWMFrequencyTextBox);
+            this.DebugGroupBox.Controls.Add(this.PWMFrequencyApplyButton);
+            this.DebugGroupBox.Controls.Add(this.PWMFrequencyLabel);
             this.DebugGroupBox.Controls.Add(this.WaterPumpOnOffCheckBox);
             this.DebugGroupBox.Controls.Add(this.GetStatusUpdatesCheckBox);
             this.DebugGroupBox.Location = new System.Drawing.Point(388, 27);
@@ -593,6 +601,42 @@
             this.GetStatusUpdatesCheckBox.Text = "Get regular status updates from the device";
             this.GetStatusUpdatesCheckBox.UseVisualStyleBackColor = true;
             this.GetStatusUpdatesCheckBox.CheckedChanged += new System.EventHandler(this.GetStatusUpdatesCheckBox_CheckedChanged);
+            // 
+            // PWMFrequencyLabel
+            // 
+            this.PWMFrequencyLabel.AutoSize = true;
+            this.PWMFrequencyLabel.Location = new System.Drawing.Point(6, 20);
+            this.PWMFrequencyLabel.Name = "PWMFrequencyLabel";
+            this.PWMFrequencyLabel.Size = new System.Drawing.Size(177, 13);
+            this.PWMFrequencyLabel.TabIndex = 2;
+            this.PWMFrequencyLabel.Text = "Water pump driver PWM-frequency:";
+            // 
+            // PWMFrequencyApplyButton
+            // 
+            this.PWMFrequencyApplyButton.Location = new System.Drawing.Point(274, 16);
+            this.PWMFrequencyApplyButton.Name = "PWMFrequencyApplyButton";
+            this.PWMFrequencyApplyButton.Size = new System.Drawing.Size(55, 23);
+            this.PWMFrequencyApplyButton.TabIndex = 4;
+            this.PWMFrequencyApplyButton.Text = "Apply";
+            this.PWMFrequencyApplyButton.UseVisualStyleBackColor = true;
+            this.PWMFrequencyApplyButton.Click += new System.EventHandler(this.PWMFrequencyApplyButton_Click);
+            // 
+            // PWMFrequencyTextBox
+            // 
+            this.PWMFrequencyTextBox.Location = new System.Drawing.Point(184, 17);
+            this.PWMFrequencyTextBox.Name = "PWMFrequencyTextBox";
+            this.PWMFrequencyTextBox.Size = new System.Drawing.Size(59, 20);
+            this.PWMFrequencyTextBox.TabIndex = 5;
+            this.PWMFrequencyTextBox.Text = "490";
+            // 
+            // HzLabel
+            // 
+            this.HzLabel.AutoSize = true;
+            this.HzLabel.Location = new System.Drawing.Point(246, 20);
+            this.HzLabel.Name = "HzLabel";
+            this.HzLabel.Size = new System.Drawing.Size(20, 13);
+            this.HzLabel.TabIndex = 6;
+            this.HzLabel.Text = "Hz";
             // 
             // MainForm
             // 
@@ -679,6 +723,10 @@
         private System.Windows.Forms.CheckBox GetStatusUpdatesCheckBox;
         private System.Windows.Forms.ToolStripMenuItem ServiceModeToolStripMenuItem;
         private System.Windows.Forms.CheckBox WaterPumpOnOffCheckBox;
+        private System.Windows.Forms.Label PWMFrequencyLabel;
+        private System.Windows.Forms.Button PWMFrequencyApplyButton;
+        private System.Windows.Forms.Label HzLabel;
+        private System.Windows.Forms.TextBox PWMFrequencyTextBox;
     }
 }
 

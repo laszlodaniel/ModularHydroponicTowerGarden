@@ -28,6 +28,7 @@ namespace MHTG
         public byte TemperatureSensors = 0;
         public float ExternalTemperature = 0;
         public float InternalTemperature = 0;
+        public ushort PWMFrequency = 0;
 
         public string SelectedPort = String.Empty;
         public static string UpdatePort = String.Empty;
@@ -474,7 +475,7 @@ namespace MHTG
                                     switch (SubDataCode)
                                     {
                                         case 0x01: // read settings
-                                            if (PayloadLength > 12)
+                                            if (PayloadLength > 14)
                                             {
                                                 Util.UpdateTextBox(CommunicationTextBox, "[RX->] Settings response", packet);
                                                 WaterPumpSpeed = (byte)(Math.Round((float)(Payload[0] + 1) / 256 * 100)); // convert PWM value to percent
@@ -483,6 +484,7 @@ namespace MHTG
                                                 TemperatureSensors = Payload[9];
                                                 TemperatureUnit = Payload[10];
                                                 NTCBetaValue = (Payload[11] << 8) | Payload[12];
+                                                PWMFrequency = (ushort)((Payload[13] << 8) | Payload[14]);
 
                                                 SettingsGroupBox.BeginInvoke((MethodInvoker)delegate
                                                 {
@@ -571,7 +573,13 @@ namespace MHTG
                                                                                              "       - water pump off-time: " + WaterPumpOffTimeTextBox.Text + " minutes" + Environment.NewLine +
                                                                                              "       - temperature sensors: " + TemperatureSensorsComboBox.Text + Environment.NewLine +
                                                                                              "       - temperature unit: " + TemperatureUnitComboBox.Text + Environment.NewLine +
-                                                                                             "       - NTC beta value: " + NTCBetaValueTextBox.Text + " K", null);
+                                                                                             "       - NTC beta value: " + NTCBetaValueTextBox.Text + " K" + Environment.NewLine +
+                                                                                             "       - PWM-frequency: " + PWMFrequency.ToString("0") + " Hz", null);
+                                                });
+
+                                                SettingsGroupBox.BeginInvoke((MethodInvoker)delegate
+                                                {
+                                                    PWMFrequencyTextBox.Text = PWMFrequency.ToString("0");
                                                 });
                                             }
                                             else
@@ -766,6 +774,18 @@ namespace MHTG
                                                 Util.UpdateTextBox(CommunicationTextBox, "[RX->] Data received", packet);
                                             }
                                             break;
+                                        case 0x02: // write EEPROM
+                                            if (Payload.Length > 0)
+                                            {
+                                                if (Payload[0] == 0x00) Util.UpdateTextBox(CommunicationTextBox, "[RX->] EEPROM write successful", packet);
+                                            }
+                                            break;
+                                        case 0x03: // PWM-frequency changed
+                                            if (Payload.Length > 0)
+                                            {
+                                                if (Payload[0] == 0x00) Util.UpdateTextBox(CommunicationTextBox, "[RX->] PWM-frequency changed successfully", packet);
+                                            }
+                                            break;
                                         default:
                                             Util.UpdateTextBox(CommunicationTextBox, "[RX->] Data received", packet);
                                             break;
@@ -790,10 +810,13 @@ namespace MHTG
                                             Util.UpdateTextBox(CommunicationTextBox, "[RX->] Error: invalid payload value(s)", packet);
                                             break;
                                         case 0x05:
-                                            Util.UpdateTextBox(CommunicationTextBox, "[RX->] Error: invalid checksum", packet);
+                                            Util.UpdateTextBox(CommunicationTextBox, "[RX->] Error: invalid packet checksum", packet);
                                             break;
                                         case 0x06:
                                             Util.UpdateTextBox(CommunicationTextBox, "[RX->] Error: packet timeout occured", packet);
+                                            break;
+                                        case 0xFC:
+                                            Util.UpdateTextBox(CommunicationTextBox, "[RX->] Error: EEPROM checksum mismatch", packet);
                                             break;
                                         case 0xFD:
                                             Util.UpdateTextBox(CommunicationTextBox, "[RX->] Error: not enough MCU RAM", packet);
@@ -843,6 +866,7 @@ namespace MHTG
             NTCBetaValueTextBox.Text = "3950";
             TemperatureUnitComboBox.SelectedIndex = 0;
             TemperatureSensorsComboBox.SelectedIndex = 0;
+            PWMFrequencyTextBox.Text = "490";
 
             Util.UpdateTextBox(CommunicationTextBox, "[INFO] Default settings restored." + Environment.NewLine + 
                                                      "       Click the \"Write settings\" button" + Environment.NewLine +
@@ -898,12 +922,17 @@ namespace MHTG
 
             int.TryParse(NTCBetaValueTextBox.Text, out NTCBetaValue); // 0 if failed
             if (NTCBetaValue == 0) NTCBetaValue = 3950; // K default
-
             byte[] NTCBetaValueArray = new byte[2];
             NTCBetaValueArray[0] = (byte)((NTCBetaValue >> 8) & 0xFF);
             NTCBetaValueArray[1] = (byte)(NTCBetaValue & 0xFF);
 
-            byte[] SettingsPayload = new byte[13];
+            ushort.TryParse(PWMFrequencyTextBox.Text, out PWMFrequency);
+            if (PWMFrequency == 0) PWMFrequency = 490;
+            byte[] PWMFrequencyArray = new byte[2];
+            PWMFrequencyArray[0] = (byte)((PWMFrequency >> 8) & 0xFF);
+            PWMFrequencyArray[1] = (byte)(PWMFrequency & 0xFF);
+
+            byte[] SettingsPayload = new byte[15];
             SettingsPayload[0] = WaterPumpSpeed;
             SettingsPayload[1] = WaterPumpOnTimeArray[0];
             SettingsPayload[2] = WaterPumpOnTimeArray[1];
@@ -917,11 +946,13 @@ namespace MHTG
             SettingsPayload[10] = TemperatureUnit;
             SettingsPayload[11] = NTCBetaValueArray[0];
             SettingsPayload[12] = NTCBetaValueArray[1];
+            SettingsPayload[13] = PWMFrequencyArray[0];
+            SettingsPayload[14] = PWMFrequencyArray[1];
 
-            byte[] WriteSettings = new byte[19];
+            byte[] WriteSettings = new byte[21];
             WriteSettings[0] = 0x3D; // sync
             WriteSettings[1] = 0x00; // length low byte
-            WriteSettings[2] = 0x0F; // length high byte
+            WriteSettings[2] = 0x11; // length high byte
             WriteSettings[3] = 0x03; // data code
             WriteSettings[4] = 0x02; // sub-data code
             
@@ -935,7 +966,7 @@ namespace MHTG
             {
                 Checksum += WriteSettings[j];
             }
-            WriteSettings[18] = Checksum;
+            WriteSettings[20] = Checksum;
 
             Util.UpdateTextBox(CommunicationTextBox, "[<-TX] Write settings", WriteSettings);
             Serial.Write(WriteSettings, 0, WriteSettings.Length);
@@ -962,19 +993,19 @@ namespace MHTG
             if (TemperatureSensorsComboBox.SelectedIndex != 0)
             {
                 TemperatureUnitComboBox.Enabled = true;
+                TemperatureUnitLabel.Enabled = true;
             }
             else
             {
                 TemperatureUnitComboBox.Enabled = false;
+                TemperatureUnitLabel.Enabled = false;
             }
         }
 
         private void StatusButton_Click(object sender, EventArgs e)
         {
-
             Util.UpdateTextBox(CommunicationTextBox, "[<-TX] Status request", StatusRequest);
             Serial.Write(StatusRequest, 0, StatusRequest.Length);
-
         }
 
         private void ResetButton_Click(object sender, EventArgs e)
@@ -1178,6 +1209,35 @@ namespace MHTG
                     Serial.Write(TurnOffWaterPump, 0, TurnOffWaterPump.Length);
                 }
             }
+        }
+
+        private void PWMFrequencyApplyButton_Click(object sender, EventArgs e)
+        {
+            ushort.TryParse(PWMFrequencyTextBox.Text, out PWMFrequency);
+            if (PWMFrequency == 0) PWMFrequency = 490;
+            if (PWMFrequency < 245)
+            {
+                PWMFrequency = 245; // minimum suppoorted PWM-frequency
+                PWMFrequencyTextBox.Text = "245";
+            }
+
+            byte PWMFrequencyHB = (byte)((PWMFrequency >> 8) & 0xFF);
+            byte PWMFrequencyLB = (byte)(PWMFrequency & 0xFF);
+
+            List<byte> ChangePWMFrequencyPacketBytes = new List<byte>();
+            byte checksum = 0;
+            ChangePWMFrequencyPacketBytes.AddRange(new byte[] { 0x3D, 0x00, 0x04, 0x0E, 0x03, PWMFrequencyHB, PWMFrequencyLB });
+
+            for (int i = 1; i < ChangePWMFrequencyPacketBytes.Count; i++)
+            {
+                checksum += ChangePWMFrequencyPacketBytes[i];
+            }
+
+            ChangePWMFrequencyPacketBytes.Add(checksum);
+
+            byte[] ChangePWMFrequencyPacket = ChangePWMFrequencyPacketBytes.ToArray();
+            Util.UpdateTextBox(CommunicationTextBox, "[<-TX] Change PWM-frequency", ChangePWMFrequencyPacket);
+            Serial.Write(ChangePWMFrequencyPacket, 0, ChangePWMFrequencyPacket.Length);
         }
     }
 }

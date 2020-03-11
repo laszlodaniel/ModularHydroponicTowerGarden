@@ -36,7 +36,7 @@
 
 // Firmware date/time of compilation in 64-bit UNIX time
 // https://www.epochconverter.com/hex
-#define FW_DATE 0x000000005E628281
+#define FW_DATE 0x000000005E68DAC3
 
 #define TEMP_EXT      A0 // external 10k NTC thermistor is connected to this analog pin
 #define TEMP_INT      A1 // internal 10k NTC thermistor is connected to this analog pin
@@ -71,9 +71,11 @@
 #define error_datacode_invalid_command          0x02
 #define error_subdatacode_invalid_value         0x03
 #define error_payload_invalid_values            0x04
-#define error_checksum_invalid_value            0x05
+#define error_packet_checksum_invalid_value     0x05
 #define error_packet_timeout_occured            0x06
 // 0x06-0xFD reserved
+#define error_eeprom_checksum_mismatch          0xFC
+#define error_not_enough_mcu_ram                0xFD
 #define error_internal                          0xFE
 #define error_fatal                             0xFF
 
@@ -97,7 +99,7 @@ uint32_t last_update_millis = 0;
 uint32_t last_wpump_millis = 0;
 
 // EEPROM settings
-uint8_t eeprom_content[32];
+uint8_t eeprom_content[64];
 uint8_t hw_version[2] = { 0x00, 0x00 };
 uint8_t hw_date[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 uint8_t assembly_date[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
@@ -107,6 +109,7 @@ uint32_t wpump_ontime = 0; // 900000 milliseconds = 900 seconds = 15 minutes
 uint32_t wpump_offtime = 0; // 900000 milliseconds = 900 seconds = 15 minutes
 uint8_t enabled_temperature_sensors = 0;
 uint8_t temperature_unit = 0;
+uint16_t pwm_frequency = 490; // Hz
 uint8_t calculated_checksum = 0;
 bool checksum_ok = false;
 
@@ -364,6 +367,98 @@ void read_avr_signature(uint8_t *target)
 } // end of read_avr_signature
 
 
+/*************************************************************************
+Function: update_pwm_frequency()
+Purpose:  change water pump driver PWM-frequency
+Note:     frequency may be changed while the water pump is running
+**************************************************************************/
+void update_pwm_frequency(uint16_t frequency)
+{
+    cli(); // stop interrupts
+    TCNT1  = 0; // initialize counter value to 0
+    
+    uint32_t prescaler = ((16000000UL) / (1 * pwm_frequency)) - 1; // calculate prescaler to achieve desired frequency
+    if (prescaler > 65535) prescaler = 0xFFFF; // limit prescaler to a 16-bit value (OCR1A is a 16-bit register)
+    OCR1A = (uint16_t)prescaler; // set compare match register
+    
+    // Set mode to "PWM, Phase and Frequency Correct"
+    TCCR1A |= (0 << WGM11) | (1 << WGM10);
+    TCCR1B |= (1 << WGM13) | (0 << WGM12);
+    
+    // Set CS12, CS11 and CS10 bits for 1 prescaler
+    TCCR1B |= (0 << CS12) | (0 << CS11) | (1 << CS10);
+    sei(); // allow interrupts
+    
+} // end of update_pwm_frequency
+
+
+/*************************************************************************
+Function: read_eeprom_settings()
+Purpose:  read internal EEPROM into RAM
+Note:     -
+**************************************************************************/
+void read_eeprom_settings(void)
+{
+    // Read first 64 bytes of the internal EEPROM
+    for (uint8_t i = 0; i < 64; i++)
+    {
+        eeprom_content[i] = EEPROM.read(i);
+    }
+    
+    // Calculate expected checkum
+    calculated_checksum = calculate_checksum(eeprom_content, 0, 63);
+
+    if (calculated_checksum == eeprom_content[0x3F]) checksum_ok = true;
+    else
+    {
+        checksum_ok = false;
+        send_usb_packet(ok_error, error_eeprom_checksum_mismatch, err, 1);
+    }
+    
+} // end of read_eeprom_settings
+
+
+/*************************************************************************
+Function: default_eeprom_settings()
+Purpose:  sets default values in RAM when the EEPROM checksum doesn't match
+Note:     -
+**************************************************************************/
+void default_eeprom_settings(void)
+{
+    hw_version[0] = 0x00; // V1.99 "error version"
+    hw_version[1] = 0xC7;
+    hw_date[0] = 0x00;
+    hw_date[1] = 0x00;
+    hw_date[2] = 0x00;
+    hw_date[3] = 0x00;
+    hw_date[4] = 0x00;
+    hw_date[5] = 0x00;
+    hw_date[6] = 0x00;
+    hw_date[7] = 0x00;
+    assembly_date[0] = 0x00;
+    assembly_date[1] = 0x00;
+    assembly_date[2] = 0x00;
+    assembly_date[3] = 0x00;
+    assembly_date[4] = 0x00;
+    assembly_date[5] = 0x00;
+    assembly_date[6] = 0x00;
+    assembly_date[7] = 0x00;
+    wpump_pwm = 0x7F; // 0x7F = 127 = 50%
+    change_wpump_speed(wpump_pwm); // gradually turn on the water pump
+    wpump_ontime = 900000; // 15 minutes
+    wpump_offtime = 900000; // 15 minutes
+    if (wpump_on) wpump_interval = wpump_ontime;
+    else wpump_interval = wpump_offtime;
+    enabled_temperature_sensors = 0; // 0 = none, 1 = external, 2 = internal, 3 = both external and internal temperature sensors are enabled
+    temperature_unit = 1; // Celsius = 1, Fahrenheit = 2, Kelvin = 4
+    beta = 3950;
+    inv_beta = 1.00 / (float)beta;
+    pwm_frequency = 490; // default 490 Hz of Timer 1
+    update_pwm_frequency(pwm_frequency);
+    wpump_on = true;
+}
+
+
 /*****************************************************************************
 Function: update_settings()
 Purpose:  takes values from the temporary eeprom_content array and updates variables
@@ -434,11 +529,18 @@ void update_settings(void)
             }
         }
     }
+    else
+    {
+        change_wpump_speed(0);
+        wpump_on = false;
+    }
 
     enabled_temperature_sensors = eeprom_content[0x1B];
     temperature_unit = eeprom_content[0x1C];
     beta = to_uint16(eeprom_content[0x1D], eeprom_content[0x1E]);
     inv_beta = 1.00 / (float)beta;
+    pwm_frequency = to_uint16(eeprom_content[0x1F], eeprom_content[0x20]);
+    if (pwm_frequency != 490) update_pwm_frequency(pwm_frequency);
     
 } // end of update_settings
 
@@ -545,7 +647,7 @@ void send_usb_packet(uint8_t command, uint8_t subdatacode, uint8_t *payloadbuff,
     // Check if there's enough RAM to store the whole packet
     if (free_ram() < (packet_length + 50)) // require +50 free bytes to be safe
     {
-        uint8_t error[7] = { 0x3D, 0x00, 0x03, 0x8F, 0xFD, 0xFF, 0x8E }; // prepare the "not enough MCU RAM" error message
+        uint8_t error[7] = { 0x3D, 0x00, 0x03, 0x8F, error_not_enough_mcu_ram, 0xFF, 0x8E }; // prepare the "not enough MCU RAM" error message, error_not_enough_mcu_ram = 0xFD
         for (uint16_t i = 0; i < 7; i++)
         {
             Serial.write(error[i]);
@@ -810,7 +912,7 @@ void handle_usb_data(void)
             // Compare calculated checksum to the received CHECKSUM byte
             if (calculated_checksum != checksum) // if they are not the same
             {
-                send_usb_packet(ok_error, error_checksum_invalid_value, err, 1);
+                send_usb_packet(ok_error, error_packet_checksum_invalid_value, err, 1);
                 return; // exit, let the loop call this function again
             }
 
@@ -841,33 +943,33 @@ void handle_usb_data(void)
                 {
                     switch (subdatacode) // evaluate SUB-DATA CODE byte
                     {
-                        case 0x01: // read settings
+                        case 0x01: // read settings, a proportion of the internal EEPROM
                         {
-                            uint8_t settings_payload[13];
-                            for (uint8_t i = 0; i < 13; i++) // copy the last 13 bytes from the current eeprom_content array
+                            uint8_t settings_payload[15];
+                            for (uint8_t i = 0; i < 15; i++) // copy the last 14 bytes from the current eeprom_content array
                             {
                                 settings_payload[i] = eeprom_content[0x12 + i];
                             }
                             
-                            send_usb_packet(settings, 0x01, settings_payload, 13);
+                            send_usb_packet(settings, 0x01, settings_payload, 15);
                             break;
                         }
                         case 0x02: // write settings
                         {
-                            if (payload_length < 13)
+                            if (payload_length < 15)
                             {
                                 send_usb_packet(ok_error, error_payload_invalid_values, err, 1);
                                 break;
                             }
 
-                            for (uint8_t i = 0; i < 13; i++) // overwrite settings in the temporary EEPROM array
+                            for (uint8_t i = 0; i < 15; i++) // overwrite settings in the temporary EEPROM array
                             {
                                 eeprom_content[0x12 + i] = cmd_payload[i];
                             }
 
-                            eeprom_content[0x1F] = calculate_checksum(eeprom_content, 0, 31); // re-calculate checksum
+                            eeprom_content[0x3F] = calculate_checksum(eeprom_content, 0, 63); // re-calculate checksum
 
-                            for (uint8_t i = 0; i < 32; i++) // update EEPROM (write value if different)
+                            for (uint8_t i = 0; i < 64; i++) // update EEPROM (write value if different)
                             {
                                 EEPROM.update(i, eeprom_content[i]);
                             }
@@ -1026,12 +1128,39 @@ void handle_usb_data(void)
                                     EEPROM.update(index + i, cmd_payload[2 + i]);
                                 }
 
+                                // Checksum at 0x3F is not re-calculated automatically here! Make sure to write the correct value with the data above or with a second go!
+
                                 send_usb_packet(debug, 0x02, ack, 1);
                             }
                             else
                             {
                                 send_usb_packet(ok_error, error_payload_invalid_values, err, 1);
                             }
+                            break;
+                        }
+                        case 0x03: // update water pump driver PWM-frequency
+                        {
+                            if (payload_length < 2)
+                            {
+                                send_usb_packet(ok_error, error_payload_invalid_values, err, 1);
+                                break;
+                            }
+
+                            // Update the local RAM-copy of the EEPROM
+                            eeprom_content[0x1F] = cmd_payload[0];
+                            eeprom_content[0x20] = cmd_payload[1];
+                            eeprom_content[0x3F] = calculate_checksum(eeprom_content, 0, 63);
+
+                            // Update values in the EEPROM too
+                            EEPROM.update(0x1F, cmd_payload[0]);
+                            EEPROM.update(0x20, cmd_payload[1]);
+                            EEPROM.update(0x3F, eeprom_content[0x3F]);
+
+                            // Update frequency and restart water pump
+                            uint16_t frequency = to_uint16(cmd_payload[0], cmd_payload[1]);
+                            update_pwm_frequency(frequency);
+
+                            send_usb_packet(debug, 0x03, ack, 1);
                             break;
                         }
                         default: // other values are not used
@@ -1065,64 +1194,24 @@ void handle_usb_data(void)
 void setup()
 {
     sei(); // enable interrupts
+    
     Serial.begin(250000);
+    
     pinMode(RED_LED_PIN, OUTPUT);
     digitalWrite(RED_LED_PIN, HIGH); // turn off red LED
     pinMode(WATERPUMP_PIN, OUTPUT);
     attachInterrupt(digitalPinToInterrupt(2), handle_mode_button, FALLING);
-
-    read_avr_signature(avr_signature); // read AVR signature bytes that identifies the microcontroller
-    lcd_init();
-
-    // Read first 32 bytes of the internal EEPROM
-    for (uint8_t i = 0; i < 32; i++)
-    {
-        eeprom_content[i] = EEPROM.read(i);
-    }
     
-    // Verify EEPROM content
-    calculated_checksum = calculate_checksum(eeprom_content, 0, 31);
-
-    if (calculated_checksum == eeprom_content[0x1F]) // internal EEPROM checksum verified, load settings
-    {
-        checksum_ok = true;
-        update_settings();
-    }
-    else // internal EEPROM checksum error, load default settings
-    {
-        checksum_ok = false;
-        hw_version[0] = 0x00; // V1.02
-        hw_version[1] = 0x66;
-        hw_date[0] = 0x00;
-        hw_date[1] = 0x00;
-        hw_date[2] = 0x00;
-        hw_date[3] = 0x00;
-        hw_date[4] = 0x5D;
-        hw_date[5] = 0xCA;
-        hw_date[6] = 0xBE;
-        hw_date[7] = 0x0D;
-        assembly_date[0] = 0x00; // 2020.01.12 13:33:31
-        assembly_date[1] = 0x00;
-        assembly_date[2] = 0x00;
-        assembly_date[3] = 0x00;
-        assembly_date[4] = 0x5D;
-        assembly_date[5] = 0xAC;
-        assembly_date[6] = 0x57;
-        assembly_date[7] = 0x23;
-        wpump_pwm = 0x7F; // 0x7F = 127 = 50%
-        change_wpump_speed(wpump_pwm); // gradually turn on the water pump
-        wpump_ontime = 900000; // 15 minutes
-        wpump_offtime = 900000; // 15 minutes
-        if (wpump_on) wpump_interval = wpump_ontime;
-        else wpump_interval = wpump_offtime;
-        enabled_temperature_sensors = 0; // 0 = none, 1 = external, 2 = internal, 3 = both external and internal temperature sensors are enabled
-        temperature_unit = 1; // Celsius = 1, Fahrenheit = 2, Kelvin = 4
-        beta = 3950;
-        inv_beta = 1.00 / (float)beta;
-        wpump_on = true;
-    }
-
+    read_avr_signature(avr_signature); // read AVR signature bytes that identifies the microcontroller
+    
+    lcd_init(); // init LCD
+    
+    read_eeprom_settings(); // read internal EEPROM
+    if (checksum_ok) update_settings();
+    else default_eeprom_settings();
+    
     wdt_enable(WDTO_4S); // reset program if it hangs for more than 4 seconds
+    
     send_usb_packet(reset, 0x01, ack, 1); // confirm device readiness
 }
 
