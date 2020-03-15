@@ -418,42 +418,42 @@ namespace MHTG
 
                                         ExternalTemperature = BitConverter.ToSingle(new byte[4] { Payload[6], Payload[7], Payload[8], Payload[9] }, 0);
                                         InternalTemperature = BitConverter.ToSingle(new byte[4] { Payload[10], Payload[11], Payload[12], Payload[13] }, 0);
-                                        string TemperatureString = "         - external: ---.-" + TemperatureUnitLabel01.Text + Environment.NewLine +
-                                                                   "         - internal: ---.-" + TemperatureUnitLabel02.Text;
+                                        string TemperatureString = "         - external: ----" + TemperatureUnitLabel01.Text + Environment.NewLine +
+                                                                   "         - internal: ----" + TemperatureUnitLabel02.Text;
 
                                         TemperaturesGroupBox.BeginInvoke((MethodInvoker)delegate
                                         {
                                             switch (TemperatureSensors)
                                             {
                                                 case 0: // none
-                                                TemperatureString = "         - external: ---.-" + TemperatureUnitLabel01.Text + Environment.NewLine +
-                                                                        "         - internal: ---.-" + TemperatureUnitLabel02.Text;
-                                                    ExternalTemperatureTextBox.Text = "---.-";
-                                                    InternalTemperatureTextBox.Text = "---.-";
+                                                TemperatureString = "         - external: ----" + Environment.NewLine +
+                                                                    "         - internal: ----";
+                                                    ExternalTemperatureTextBox.Text = "----";
+                                                    InternalTemperatureTextBox.Text = "----";
                                                     break;
                                                 case 1: // external
                                                 TemperatureString = "         - external: " + ExternalTemperature.ToString("0.0") + TemperatureUnitLabel01.Text + Environment.NewLine +
-                                                                        "         - internal: ---.-" + TemperatureUnitLabel02.Text;
+                                                                    "         - internal: ----" + TemperatureUnitLabel02.Text;
                                                     ExternalTemperatureTextBox.Text = ExternalTemperature.ToString("0.0");
-                                                    InternalTemperatureTextBox.Text = "---.-";
+                                                    InternalTemperatureTextBox.Text = "----";
                                                     break;
                                                 case 2: // internal
-                                                TemperatureString = "         - external: ---.-" + TemperatureUnitLabel01.Text + Environment.NewLine +
-                                                                        "         - internal: " + InternalTemperature.ToString("0.0") + TemperatureUnitLabel02.Text;
-                                                    ExternalTemperatureTextBox.Text = "---.-";
+                                                TemperatureString = "         - external: ----" + TemperatureUnitLabel01.Text + Environment.NewLine +
+                                                                    "         - internal: " + InternalTemperature.ToString("0.0") + TemperatureUnitLabel02.Text;
+                                                    ExternalTemperatureTextBox.Text = "----";
                                                     InternalTemperatureTextBox.Text = InternalTemperature.ToString("0.0");
                                                     break;
                                                 case 3: // external and internal (both)
                                                 TemperatureString = "         - external: " + ExternalTemperature.ToString("0.0") + TemperatureUnitLabel01.Text + Environment.NewLine +
-                                                                        "         - internal: " + InternalTemperature.ToString("0.0") + TemperatureUnitLabel02.Text;
+                                                                    "         - internal: " + InternalTemperature.ToString("0.0") + TemperatureUnitLabel02.Text;
                                                     ExternalTemperatureTextBox.Text = ExternalTemperature.ToString("0.0");
                                                     InternalTemperatureTextBox.Text = InternalTemperature.ToString("0.0");
                                                     break;
                                                 default:
-                                                    TemperatureString = "         - external: ---.-" + TemperatureUnitLabel01.Text + Environment.NewLine +
-                                                                        "         - internal: ---.-" + TemperatureUnitLabel02.Text;
-                                                    ExternalTemperatureTextBox.Text = "---.-";
-                                                    InternalTemperatureTextBox.Text = "---.-";
+                                                    TemperatureString = "         - external: ----" + TemperatureUnitLabel01.Text + Environment.NewLine +
+                                                                        "         - internal: ----" + TemperatureUnitLabel02.Text;
+                                                    ExternalTemperatureTextBox.Text = "----";
+                                                    InternalTemperatureTextBox.Text = "----";
                                                     break;
                                             }
                                         });
@@ -1214,10 +1214,10 @@ namespace MHTG
         private void PWMFrequencyApplyButton_Click(object sender, EventArgs e)
         {
             ushort.TryParse(PWMFrequencyTextBox.Text, out PWMFrequency);
-            if (PWMFrequency == 0) PWMFrequency = 490;
+            if (PWMFrequency == 0) PWMFrequency = 490; // sweet-spot
             if (PWMFrequency < 245)
             {
-                PWMFrequency = 245; // minimum suppoorted PWM-frequency
+                PWMFrequency = 245; // minimum suppoorted PWM-frequency, it's very rough, though
                 PWMFrequencyTextBox.Text = "245";
             }
 

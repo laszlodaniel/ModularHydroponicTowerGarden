@@ -31,12 +31,13 @@
 #include <util/atomic.h>
 #include <EEPROM.h>
 #include <LiquidCrystal_I2C.h> // https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
+#include <TimerOne.h> // https://github.com/PaulStoffregen/TimerOne
 #include <Wire.h>
 
 
 // Firmware date/time of compilation in 64-bit UNIX time
 // https://www.epochconverter.com/hex
-#define FW_DATE 0x000000005E68DAC3
+#define FW_DATE 0x000000005E6E658A
 
 #define TEMP_EXT      A0 // external 10k NTC thermistor is connected to this analog pin
 #define TEMP_INT      A1 // internal 10k NTC thermistor is connected to this analog pin
@@ -97,14 +98,22 @@ uint32_t current_millis = 0;
 uint8_t current_timestamp[4]; // current time is stored here when "update_timestamp" is called
 uint32_t last_update_millis = 0;
 uint32_t last_wpump_millis = 0;
+uint32_t remaining_time = 0;
+uint8_t percent_left = 0;
+uint32_t t = 0; // remaining time is seconds
+uint8_t h, m, s; // calculated from "t": hours component (h), minutes component (m), seconds component (s)
 
 // EEPROM settings
 uint8_t eeprom_content[64];
+uint8_t default_eeprom_content[64] = { 0x00, 0xC7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                       0x00, 0x00, 0x7F, 0x00, 0x0D, 0xBB, 0xA0, 0x00, 0x0D, 0xBB, 0xA0, 0x00, 0x01, 0x0F, 0x6E, 0x01,
+                                       0xEA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 uint8_t hw_version[2] = { 0x00, 0x00 };
 uint8_t hw_date[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 uint8_t assembly_date[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-volatile uint8_t old_wpump_pwm = 0;
-volatile uint8_t wpump_pwm = 0; // 0: 0% - 255: 100%
+uint8_t old_wpump_pwm = 0;
+uint8_t wpump_pwm = 0; // 0: 0% - 255: 100%
 uint32_t wpump_ontime = 0; // 900000 milliseconds = 900 seconds = 15 minutes
 uint32_t wpump_offtime = 0; // 900000 milliseconds = 900 seconds = 15 minutes
 uint8_t enabled_temperature_sensors = 0;
@@ -137,6 +146,11 @@ uint8_t ret[1]; // general array to store arbitrary bytes
 // Custom LCD-characters
 // https://maxpromer.github.io/LCD-Character-Creator/
 uint8_t degree_symbol[8] = { 0x06, 0x09, 0x09, 0x06, 0x00, 0x00, 0x00, 0x00 }; // °
+uint8_t progress_bar_1[8] = { 0x00, 0x00, 0x10, 0x10, 0x10, 0x00, 0x00, 0x00 };
+uint8_t progress_bar_2[8] = { 0x00, 0x00, 0x18, 0x18, 0x18, 0x00, 0x00, 0x00 };
+uint8_t progress_bar_3[8] = { 0x00, 0x00, 0x1C, 0x1C, 0x1C, 0x00, 0x00, 0x00 };
+uint8_t progress_bar_4[8] = { 0x00, 0x00, 0x1E, 0x1E, 0x1E, 0x00, 0x00, 0x00 };
+uint8_t progress_bar_5[8] = { 0x00, 0x00, 0x1F, 0x1F, 0x1F, 0x00, 0x00, 0x00 };
 
 typedef union {
     float number;
@@ -297,8 +311,7 @@ void handle_mode_button(void)
 /*****************************************************************************
 Function: change_wpump_speed()
 Purpose:  gradually changes water pump speed from current to target value
-Note:     it's easier on the power supply if the speed is changed slowly,
-          default pwm-frequency is 490.2 Hz (PB1/D9 pin uses Timer 1)
+Note:     it's easier on the power supply if the speed is changed slowly
 ******************************************************************************/
 void change_wpump_speed(uint8_t new_wpump_pwm)
 {
@@ -306,7 +319,7 @@ void change_wpump_speed(uint8_t new_wpump_pwm)
     {
         if (new_wpump_pwm == 0)
         {
-            digitalWrite(WATERPUMP_PIN, LOW);
+            Timer1.pwm(WATERPUMP_PIN, 0); // turn off water pump
             digitalWrite(RED_LED_PIN, HIGH); // turn off indicator LED
             old_wpump_pwm = 0;
             return;
@@ -317,16 +330,18 @@ void change_wpump_speed(uint8_t new_wpump_pwm)
         {
             for (uint16_t i = old_wpump_pwm; i <= new_wpump_pwm; i++)
             {
-                analogWrite(WATERPUMP_PIN, i);
+                Timer1.pwm(WATERPUMP_PIN, map(i, 0, 255, 0, 1023)); // 8-bit to 10-bit conversion is necessary for this library
                 delay(15);
+                wdt_reset();
             }
         }
         else if (new_wpump_pwm < old_wpump_pwm) // decrease speed
         {
             for (uint16_t i = old_wpump_pwm; i >= new_wpump_pwm; i--)
             {
-                analogWrite(WATERPUMP_PIN, i);
+                Timer1.pwm(WATERPUMP_PIN, map(i, 0, 255, 0, 1023)); // 8-bit to 10-bit conversion is necessary for this library
                 delay(15);
+                wdt_reset();
             }
         }
     
@@ -370,93 +385,14 @@ void read_avr_signature(uint8_t *target)
 /*************************************************************************
 Function: update_pwm_frequency()
 Purpose:  change water pump driver PWM-frequency
-Note:     frequency may be changed while the water pump is running
+Note:     frequency changing while the water pump is running may cause glitches
 **************************************************************************/
 void update_pwm_frequency(uint16_t frequency)
 {
-    cli(); // stop interrupts
-    TCNT1  = 0; // initialize counter value to 0
-    
-    uint32_t prescaler = ((16000000UL) / (1 * pwm_frequency)) - 1; // calculate prescaler to achieve desired frequency
-    if (prescaler > 65535) prescaler = 0xFFFF; // limit prescaler to a 16-bit value (OCR1A is a 16-bit register)
-    OCR1A = (uint16_t)prescaler; // set compare match register
-    
-    // Set mode to "PWM, Phase and Frequency Correct"
-    TCCR1A |= (0 << WGM11) | (1 << WGM10);
-    TCCR1B |= (1 << WGM13) | (0 << WGM12);
-    
-    // Set CS12, CS11 and CS10 bits for 1 prescaler
-    TCCR1B |= (0 << CS12) | (0 << CS11) | (1 << CS10);
-    sei(); // allow interrupts
+    uint16_t period = 1000000 / frequency; // microseconds
+    Timer1.setPeriod(period);
     
 } // end of update_pwm_frequency
-
-
-/*************************************************************************
-Function: read_eeprom_settings()
-Purpose:  read internal EEPROM into RAM
-Note:     -
-**************************************************************************/
-void read_eeprom_settings(void)
-{
-    // Read first 64 bytes of the internal EEPROM
-    for (uint8_t i = 0; i < 64; i++)
-    {
-        eeprom_content[i] = EEPROM.read(i);
-    }
-    
-    // Calculate expected checkum
-    calculated_checksum = calculate_checksum(eeprom_content, 0, 63);
-
-    if (calculated_checksum == eeprom_content[0x3F]) checksum_ok = true;
-    else
-    {
-        checksum_ok = false;
-        send_usb_packet(ok_error, error_eeprom_checksum_mismatch, err, 1);
-    }
-    
-} // end of read_eeprom_settings
-
-
-/*************************************************************************
-Function: default_eeprom_settings()
-Purpose:  sets default values in RAM when the EEPROM checksum doesn't match
-Note:     -
-**************************************************************************/
-void default_eeprom_settings(void)
-{
-    hw_version[0] = 0x00; // V1.99 "error version"
-    hw_version[1] = 0xC7;
-    hw_date[0] = 0x00;
-    hw_date[1] = 0x00;
-    hw_date[2] = 0x00;
-    hw_date[3] = 0x00;
-    hw_date[4] = 0x00;
-    hw_date[5] = 0x00;
-    hw_date[6] = 0x00;
-    hw_date[7] = 0x00;
-    assembly_date[0] = 0x00;
-    assembly_date[1] = 0x00;
-    assembly_date[2] = 0x00;
-    assembly_date[3] = 0x00;
-    assembly_date[4] = 0x00;
-    assembly_date[5] = 0x00;
-    assembly_date[6] = 0x00;
-    assembly_date[7] = 0x00;
-    wpump_pwm = 0x7F; // 0x7F = 127 = 50%
-    change_wpump_speed(wpump_pwm); // gradually turn on the water pump
-    wpump_ontime = 900000; // 15 minutes
-    wpump_offtime = 900000; // 15 minutes
-    if (wpump_on) wpump_interval = wpump_ontime;
-    else wpump_interval = wpump_offtime;
-    enabled_temperature_sensors = 0; // 0 = none, 1 = external, 2 = internal, 3 = both external and internal temperature sensors are enabled
-    temperature_unit = 1; // Celsius = 1, Fahrenheit = 2, Kelvin = 4
-    beta = 3950;
-    inv_beta = 1.00 / (float)beta;
-    pwm_frequency = 490; // default 490 Hz of Timer 1
-    update_pwm_frequency(pwm_frequency);
-    wpump_on = true;
-}
 
 
 /*****************************************************************************
@@ -487,6 +423,12 @@ void update_settings(void)
     wpump_pwm = eeprom_content[0x12];
     wpump_ontime = to_uint32(eeprom_content[0x13], eeprom_content[0x14], eeprom_content[0x15], eeprom_content[0x16]);
     wpump_offtime = to_uint32(eeprom_content[0x17], eeprom_content[0x18], eeprom_content[0x19], eeprom_content[0x1A]);
+    enabled_temperature_sensors = eeprom_content[0x1B];
+    temperature_unit = eeprom_content[0x1C];
+    beta = to_uint16(eeprom_content[0x1D], eeprom_content[0x1E]);
+    inv_beta = 1.00 / (float)beta;
+    pwm_frequency = to_uint16(eeprom_content[0x1F], eeprom_content[0x20]);
+    update_pwm_frequency(pwm_frequency);
 
     if (!service_mode)
     {
@@ -518,6 +460,7 @@ void update_settings(void)
                 {
                     wpump_interval = wpump_ontime;
                     wpump_on = true;
+                    update_pwm_frequency(pwm_frequency);
                     change_wpump_speed(wpump_pwm);
                 }
                 else
@@ -534,15 +477,59 @@ void update_settings(void)
         change_wpump_speed(0);
         wpump_on = false;
     }
-
-    enabled_temperature_sensors = eeprom_content[0x1B];
-    temperature_unit = eeprom_content[0x1C];
-    beta = to_uint16(eeprom_content[0x1D], eeprom_content[0x1E]);
-    inv_beta = 1.00 / (float)beta;
-    pwm_frequency = to_uint16(eeprom_content[0x1F], eeprom_content[0x20]);
-    if (pwm_frequency != 490) update_pwm_frequency(pwm_frequency);
     
 } // end of update_settings
+
+
+/*************************************************************************
+Function: default_eeprom_settings()
+Purpose:  sets default values in RAM when the EEPROM checksum doesn't match
+Note:     -
+**************************************************************************/
+void default_eeprom_settings(void)
+{
+    // Calculate checksum for the default EEPROM content array
+    default_eeprom_content[0x3F] = calculate_checksum(default_eeprom_content, 0, 63);
+
+    // Copy all values
+    for (uint8_t i = 0; i < 64; i++)
+    {
+        eeprom_content[i] = default_eeprom_content[i];
+    }
+    
+} // end of default_eeprom_settings
+
+
+/*************************************************************************
+Function: read_eeprom_settings()
+Purpose:  read internal EEPROM into RAM
+Note:     -
+**************************************************************************/
+void read_eeprom_settings(void)
+{
+    // Read first 64 bytes of the internal EEPROM into RAM
+    for (uint8_t i = 0; i < 64; i++)
+    {
+        eeprom_content[i] = EEPROM.read(i);
+    }
+    
+    // Calculate expected checkum
+    calculated_checksum = calculate_checksum(eeprom_content, 0, 63);
+
+    if (calculated_checksum == eeprom_content[0x3F])
+    {
+        checksum_ok = true;
+        update_settings(); // load and apply stored settings
+    }
+    else
+    {
+        checksum_ok = false;
+        default_eeprom_settings(); // load default settings
+        update_settings(); // apply default settings
+        send_usb_packet(ok_error, error_eeprom_checksum_mismatch, err, 1);
+    }
+    
+} // end of read_eeprom_settings
 
 
 /*************************************************************************
@@ -560,24 +547,418 @@ void lcd_init(void)
     lcd.setCursor(0, 1);
     lcd.print(F(" MODULAR HYDROPONIC "));
     lcd.setCursor(0, 2);
-    lcd.print(F(" TOWER GARDEN V1.02 "));
+    lcd.print(F("    TOWER GARDEN    "));
     lcd.setCursor(0, 3);
     lcd.print(F("--------------------"));
     lcd.createChar(0, degree_symbol); // custom character from "degree_symbol" variable with id number 0
+    lcd.createChar(1, progress_bar_1); // custom character from "progress_bar_1" variable with id number 1
+    lcd.createChar(2, progress_bar_2); // custom character from "progress_bar_2" variable with id number 2
+    lcd.createChar(3, progress_bar_3); // custom character from "progress_bar_3" variable with id number 3
+    lcd.createChar(4, progress_bar_4); // custom character from "progress_bar_1" variable with id number 4
+    lcd.createChar(5, progress_bar_5); // custom character from "progress_bar_1" variable with id number 5
     
 } // end of lcd_init
 
 
+/*************************************************************************
+Function: lcd_print_default_layout()
+Purpose:  print default text on the LCD
+Note:     -
+**************************************************************************/
+void lcd_print_default_layout(void)
+{
+    lcd.backlight();  // backlight on
+    lcd.clear();      // clear display
+    lcd.home();       // set cursor in home position (0, 0)
+    lcd.print(F("Water pump: --------")); // F(" ") makes the compiler store the string inside flash memory instead of RAM, good practice if system is low on RAM
+    lcd.setCursor(0, 1);
+    lcd.print(F("Te:------  Ti:------"));
+    lcd.setCursor(0, 2);
+    lcd.print(F("Timer: --:--:-- left"));
+    lcd.setCursor(0, 3);
+    lcd.print(F("----progress bar----"));
+    
+} // end of lcd_print_default_layout
+
+
+/*************************************************************************
+Function: lcd_print_progress_bar()
+Purpose:  prints a progress bar in the third line related to time remaining
+Note:     -
+**************************************************************************/
+void lcd_print_progress_bar(uint8_t percent)
+{
+    uint8_t value = percent;
+    uint8_t num_full_blocks = value / 5; // should be 0...20
+    uint8_t remainder = value % 5; // integer division by 5, keep the remainder in this variable, should be 0, 1, 2, 3 or 4
+    uint8_t counter = 0; // keep count on how many full blocks are printed
+
+    lcd.setCursor(0, 3);
+    for (uint8_t i = 0; i < num_full_blocks; i++)
+    {
+        lcd.write((uint8_t)5); // print full blocks
+        counter++;
+    }
+
+    if (percent < 100)
+    {
+        switch (remainder)
+        {
+            case 0:
+            {
+                lcd.print(" ");
+                break;
+            }
+            case 1:
+            {
+                lcd.write((uint8_t)1); // print 1/5th block
+                break;
+            }
+            case 2:
+            {
+                lcd.write((uint8_t)2); // print 2/5th block
+                break;
+            }
+            case 3:
+            {
+                lcd.write((uint8_t)3); // print 3/5th block
+                break;
+            }
+            case 4:
+            {
+                lcd.write((uint8_t)4); // print 4/5th block
+                break;
+            }
+        }
+
+        // Blank space to the end of the line
+        for (uint8_t i = 0; i < (19 - counter); i++)
+        {
+            lcd.print(" ");
+        }
+    }
+    
+} // end of lcd_print_progress_bar
+
+
+/*************************************************************************
+Function: lcd_print_external_temperature()
+Purpose:  prints external temperature to LCD
+Note:     -
+**************************************************************************/
+void lcd_print_external_temperature(void)
+{
+    switch (temperature_unit)
+    {
+        case 1: // Celsius
+        {
+            lcd.setCursor(3, 1);
+            
+            if ((T_ext[1] <= -10) || (T_ext[1] >= 100))
+            {
+                lcd.print(" ");
+                lcd.print(T_ext[1]);
+            }
+            else if ((T_ext[1] > -10) && (T_ext[1] < 0))
+            {
+               lcd.print(T_ext[1], 1);
+            }
+            else if ((T_ext[1] >= 0) && (T_ext[1] < 10))
+            {
+                lcd.print(T_ext[1], 2);
+            }
+            else if ((T_ext[1] >= 10) && (T_ext[1] < 100))
+            {
+                lcd.print(T_ext[1], 1);
+            }
+            else lcd.print("----");
+
+            lcd.write((uint8_t)0); // print degree-symbol
+            lcd.print("C");
+            break;
+        }
+        case 2: // Fahrenheit
+        {
+            lcd.setCursor(3, 1);
+            
+            if ((T_ext[2] <= -10) || (T_ext[2] >= 100))
+            {
+                lcd.print(" ");
+                lcd.print(T_ext[2]);
+            }
+            else if ((T_ext[2] > -10) && (T_ext[2] < 0))
+            {
+               lcd.print(T_ext[2], 1);
+            }
+            else if ((T_ext[2] >= 0) && (T_ext[2] < 10))
+            {
+                lcd.print(T_ext[2], 2);
+            }
+            else if ((T_ext[2] >= 10) && (T_ext[2] < 100))
+            {
+                lcd.print(T_ext[2], 1);
+            }
+            else lcd.print("----");
+    
+            lcd.write((uint8_t)0); // print degree-symbol
+            lcd.print("F");
+            break;
+        }
+        case 4: // Kelvin
+        {
+            lcd.setCursor(3, 1);
+            if (T_ext[0] < 10) lcd.print(T_ext[0], 3);
+            else if ((T_ext[0] >= 10) && (T_ext[0] < 100)) lcd.print(T_ext[0], 2);
+            else if (T_ext[0] >= 100) lcd.print(T_ext[0], 1);
+            else lcd.print("-----");
+            lcd.print("K");
+            break;
+        }
+    }
+    
+} // end of lcd_print_external_temperature
+
+
+/*************************************************************************
+Function: lcd_blank_external_temperature()
+Purpose:  deletes external temperature from LCD
+Note:     -
+**************************************************************************/
+void lcd_blank_external_temperature(void)
+{
+    lcd.setCursor(3, 1);
+    lcd.print("----");
+    
+    switch (temperature_unit)
+    {
+        case 1: // Celsius
+        {
+            lcd.write((uint8_t)0); // print degree-symbol
+            lcd.print("C");
+            break;
+        }
+        case 2: // Fahrenheit
+        {
+            lcd.write((uint8_t)0); // print degree-symbol
+            lcd.print("F");
+            break;
+        }
+        case 4: // Kelvin
+        {
+            lcd.print("-K");
+            break;
+        }
+    }
+    
+} // end of lcd_blank_external_temperature
+
+
+/*************************************************************************
+Function: lcd_print_internal_temperature()
+Purpose:  prints internal temperature to LCD
+Note:     -
+**************************************************************************/
+void lcd_print_internal_temperature(void)
+{
+    switch (temperature_unit)
+    {
+        case 1: // Celsius
+        {
+            lcd.setCursor(14, 1);
+    
+            if ((T_int[1] <= -10) || (T_int[1] >= 100))
+            {
+                lcd.print(" ");
+                lcd.print(T_int[1]);
+            }
+            else if ((T_int[1] > -10) && (T_int[1] < 0))
+            {
+               lcd.print(T_int[1], 1);
+            }
+            else if ((T_int[1] >= 0) && (T_int[1] < 10))
+            {
+                lcd.print(T_int[1], 2);
+            }
+            else if ((T_int[1] >= 10) && (T_int[1] < 100))
+            {
+                lcd.print(T_int[1], 1);
+            }
+            else lcd.print("----");
+
+            lcd.write((uint8_t)0); // print degree-symbol
+            lcd.print("C");
+            break;
+        }
+        case 2: // Fahrenheit
+        {
+            lcd.setCursor(14, 1);
+    
+            if ((T_int[2] <= -10) || (T_int[2] >= 100))
+            {
+                lcd.print(" ");
+                lcd.print(T_int[2]);
+            }
+            else if ((T_int[2] > -10) && (T_int[2] < 0))
+            {
+               lcd.print(T_int[2], 1);
+            }
+            else if ((T_int[2] >= 0) && (T_int[2] < 10))
+            {
+                lcd.print(T_int[2], 2);
+            }
+            else if ((T_int[2] >= 10) && (T_int[2] < 100))
+            {
+                lcd.print(T_int[2], 1);
+            }
+            else lcd.print("----");
+    
+            lcd.write((uint8_t)0); // print degree-symbol
+            lcd.print("F");
+            break;
+        }
+        case 4: // Kelvin
+        {
+            lcd.setCursor(14, 1);
+            if (T_int[0] < 10) lcd.print(T_int[0], 3);
+            else if ((T_int[0] >= 10) && (T_int[0] < 100)) lcd.print(T_int[0], 2);
+            else if (T_int[0] >= 100) lcd.print(T_int[0], 1);
+            else lcd.print("-----");
+            lcd.print("K");
+            break;
+        }
+    }
+    
+} // end of lcd_print_internal_temperature
+
+
+/*************************************************************************
+Function: lcd_blank_internal_temperature()
+Purpose:  deletes external temperature from LCD
+Note:     -
+**************************************************************************/
+void lcd_blank_internal_temperature(void)
+{
+    lcd.setCursor(14, 1);
+    lcd.print("----");
+    
+    switch (temperature_unit)
+    {
+        case 1: // Celsius
+        {
+            lcd.write((uint8_t)0); // print degree-symbol
+            lcd.print("C");
+            break;
+        }
+        case 2: // Fahrenheit
+        {
+            lcd.write((uint8_t)0); // print degree-symbol
+            lcd.print("F");
+            break;
+        }
+        case 4: // Kelvin
+        {
+            lcd.print("-K");
+            break;
+        }
+    }
+    
+} // end of lcd_blank_internal_temperature
+
+
 /*****************************************************************************
-Function: update_lcd()
-Purpose:  -
+Function: lcd_update()
+Purpose:  printc current information on the LCD
 Note:     -
 ******************************************************************************/
-void update_lcd(void)
+void lcd_update(void)
 {
-    // TODO
+    // Print water pump state in the first line
+    if (wpump_on)
+    {
+        lcd.setCursor(12, 0);
+        
+        if (!service_mode)
+        {
+            lcd.print(F("on @"));
+            uint8_t percent = (uint8_t)(round(((float)wpump_pwm + 1.0) * 100.0 / 256.0));
+            if (percent < 10)
+            {
+                lcd.print("  ");
+                lcd.print(percent);
+                lcd.print("%");
+            }
+            else if (percent < 100)
+            {
+                lcd.print(" ");
+                lcd.print(percent);
+                lcd.print("%");
+            }
+            else lcd.print(F("100%"));
+        }
+        else lcd.print(F("off     "));
+    }
+    else
+    {
+        lcd.setCursor(12, 0);
+        lcd.print(F("off     "));
+    }
+
+    // Print temperatures in the second line
+    if (enabled_temperature_sensors != 0)
+    {
+        if ((enabled_temperature_sensors & 0x03) == 3) // both external and internal temperature
+        {
+            lcd_print_external_temperature();
+            lcd_print_internal_temperature();
+        }
+        else if ((enabled_temperature_sensors & 0x03) == 2) // internal temperature only
+        {
+            lcd_blank_external_temperature();
+            lcd_print_internal_temperature();
+        }
+        else if ((enabled_temperature_sensors & 0x03) == 1) // external temperature only
+        {
+            lcd_print_external_temperature();
+            lcd_blank_internal_temperature();
+        }
+    }
+    else // there's no enabled temperature sensor
+    {
+        lcd.setCursor(0, 1);
+        lcd.print(F("Te:------  Ti:------"));
+    }
+
+    // Print timer information
+    if (!service_mode)
+    {
+        t = remaining_time / 1000; // remaining time in seconds
+        h = t / 3600; // how many integer hours are in these seconds
+        t = t % 3600; // remove integer hours, keep remainder
+        m = t / 60; // how many integer minutes are in these seconds
+        s = t % 60; // remove minutes, keep remainder for final seconds value
+
+        lcd.setCursor(7, 2);
+        if (h < 10) lcd.print("0");
+        lcd.print(h);
+        lcd.print(":");
+        if (m < 10) lcd.print("0");
+        lcd.print(m);
+        lcd.print(":");
+        if (s < 10) lcd.print("0");
+        lcd.print(s);
+        lcd.print(" left");
+    }
+    else
+    {
+        lcd.setCursor(7, 2);
+        lcd.print(F("service mode!"));
+    }
+
+    // Calculate the ratio of remaining_time and wpump_interval and print a progress bar
+    percent_left = (uint8_t)(round(((float)remaining_time / (float)wpump_interval) * 100.0));
+    lcd_print_progress_bar(percent_left);
     
-} // end of update_lcd
+} // end of lcd_update
 
 
 /*****************************************************************************
@@ -704,7 +1085,7 @@ void update_status(void)
 {
     // Gather data and send back to laptop (water pump state, water pump pwm-level, remaining time until state change, temperatures)
     uint8_t status_payload[14];
-    uint32_t remaining_time = last_wpump_millis + wpump_interval - current_millis;
+    remaining_time = last_wpump_millis + wpump_interval - current_millis;
     uint8_t remaining_time_array[4];
 
     if (!service_mode)
@@ -745,14 +1126,35 @@ void update_status(void)
     status_payload[4] = remaining_time_array[2];
     status_payload[5] = remaining_time_array[3];
     
-    status_payload[6] = temperature_payload[0];
-    status_payload[7] = temperature_payload[1];
-    status_payload[8] = temperature_payload[2];
-    status_payload[9] = temperature_payload[3];
-    status_payload[10] = temperature_payload[4];
-    status_payload[11] = temperature_payload[5];
-    status_payload[12] = temperature_payload[6];
-    status_payload[13] = temperature_payload[7];
+    if (enabled_temperature_sensors & 0x01) // external temperature sensor
+    {
+        status_payload[6] = temperature_payload[0];
+        status_payload[7] = temperature_payload[1];
+        status_payload[8] = temperature_payload[2];
+        status_payload[9] = temperature_payload[3];
+    }
+    else
+    {
+        status_payload[6] = 0;
+        status_payload[7] = 0;
+        status_payload[8] = 0;
+        status_payload[9] = 0;
+    }
+
+    if (enabled_temperature_sensors & 0x02) // internal temperature sensor
+    {
+        status_payload[10] = temperature_payload[4];
+        status_payload[11] = temperature_payload[5];
+        status_payload[12] = temperature_payload[6];
+        status_payload[13] = temperature_payload[7];
+    }
+    else
+    {
+        status_payload[10] = 0;
+        status_payload[11] = 0;
+        status_payload[12] = 0;
+        status_payload[13] = 0;
+    }
     
     send_usb_packet(status, ok, status_payload, 14);
     
@@ -999,12 +1401,31 @@ void handle_usb_data(void)
                                 break;
                             }
 
-                            if (cmd_payload[0] == 0x00)
+                            if (cmd_payload[0] & 0x01) // request to enter into service mode
                             {
-                                service_mode = false;
-                                change_wpump_speed(wpump_pwm); // restart water pump at saved speed
+                                if (!service_mode)
+                                {
+                                    service_mode = true; // enter service mode
+                                    
+                                    if (wpump_on)
+                                    {
+                                        change_wpump_speed(0); // turn off water pump
+                                    }
+                                }
                             }
-                            else service_mode = true;
+                            else // exit service mode
+                            {
+                                service_mode = false; // exit service mode
+                    
+                                if (wpump_on) // if water pump is on according to the timer
+                                {
+                                    wpump_on = true;
+                                    change_wpump_speed(wpump_pwm); // resume water pump activity
+                                }
+                    
+                                if (!wpump_on) digitalWrite(RED_LED_PIN, HIGH); // turn off red LED is this condition catches it during blinking
+                            }
+                            
                             send_usb_packet(settings, 0x04, cmd_payload, 1);
                             break;
                         }
@@ -1194,24 +1615,19 @@ void handle_usb_data(void)
 void setup()
 {
     sei(); // enable interrupts
-    
     Serial.begin(250000);
-    
     pinMode(RED_LED_PIN, OUTPUT);
     digitalWrite(RED_LED_PIN, HIGH); // turn off red LED
     pinMode(WATERPUMP_PIN, OUTPUT);
     attachInterrupt(digitalPinToInterrupt(2), handle_mode_button, FALLING);
-    
+    Timer1.initialize(2040); // 2040 us ~= 490 Hz
+    Timer1.pwm(WATERPUMP_PIN, 0); // turn off water pump, duty cycle: 0-1023
     read_avr_signature(avr_signature); // read AVR signature bytes that identifies the microcontroller
-    
     lcd_init(); // init LCD
-    
-    read_eeprom_settings(); // read internal EEPROM
-    if (checksum_ok) update_settings();
-    else default_eeprom_settings();
-    
-    wdt_enable(WDTO_4S); // reset program if it hangs for more than 4 seconds
-    
+    delay(2000);
+    lcd_print_default_layout();
+    read_eeprom_settings(); // read internal EEPROM for stored settings
+    wdt_enable(WDTO_4S); // setup watchdog timer to reset program if it hangs for more than 4 seconds
     send_usb_packet(reset, 0x01, ack, 1); // confirm device readiness
 }
 
@@ -1252,7 +1668,7 @@ void loop()
         if (autoupdate) // update external devices regularly (USB, LCD)
         {
             update_status();
-            update_lcd(); // TODO
+            lcd_update();
         }
     }
     else if (current_millis < last_update_millis) // be prepared if the millis counter overflows every month or so
