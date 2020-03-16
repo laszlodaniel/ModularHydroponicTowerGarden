@@ -72,7 +72,7 @@
             this.VersionLabel.Name = "VersionLabel";
             this.VersionLabel.Size = new System.Drawing.Size(134, 13);
             this.VersionLabel.TabIndex = 3;
-            this.VersionLabel.Text = "Version: MHTG.2020.0011";
+            this.VersionLabel.Text = "Version: MHTG.2020.0012";
             // 
             // AboutForm
             // 

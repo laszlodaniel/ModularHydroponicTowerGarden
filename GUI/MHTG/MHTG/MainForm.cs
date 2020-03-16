@@ -388,9 +388,8 @@ namespace MHTG
                                         byte WaterPumpPercentValue = (byte)(Math.Round((float)(Payload[1] + 1) / 256 * 100));
                                         string WaterPumpPercentLevel = WaterPumpPercentValue.ToString("0") + "%";
                                         string ServiceModeString = string.Empty;
-                                        TimeSpan RemainingTimeMillis = TimeSpan.FromMilliseconds(Payload[2] << 24 | Payload[3] << 16 | Payload[4] << 8 | Payload[5]);
-                                        DateTime RemainingTime = DateTime.Today.Add(RemainingTimeMillis);
-                                        string RemainingTimeString = RemainingTime.ToString("HH:mm:ss");
+                                        TimeSpan RemainingTime = TimeSpan.FromMilliseconds(Payload[2] << 24 | Payload[3] << 16 | Payload[4] << 8 | Payload[5]);
+                                        string RemainingTimeString = string.Format("{0:00}:{1:00}:{2:00}", (int)RemainingTime.TotalHours, RemainingTime.Minutes, RemainingTime.Seconds);
 
                                         if ((Payload[0] & 0x01) == 0x01) WaterPumpState = true; // enabled
                                         else WaterPumpState = false; // disabled

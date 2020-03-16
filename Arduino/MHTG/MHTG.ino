@@ -37,7 +37,7 @@
 
 // Firmware date/time of compilation in 64-bit UNIX time
 // https://www.epochconverter.com/hex
-#define FW_DATE 0x000000005E6E658A
+#define FW_DATE 0x000000005E6FB8BC
 
 #define TEMP_EXT      A0 // external 10k NTC thermistor is connected to this analog pin
 #define TEMP_INT      A1 // internal 10k NTC thermistor is connected to this analog pin
@@ -671,7 +671,7 @@ void lcd_print_external_temperature(void)
             {
                 lcd.print(T_ext[1], 1);
             }
-            else lcd.print("----");
+            else lcd.print(F("----"));
 
             lcd.write((uint8_t)0); // print degree-symbol
             lcd.print("C");
@@ -698,7 +698,7 @@ void lcd_print_external_temperature(void)
             {
                 lcd.print(T_ext[2], 1);
             }
-            else lcd.print("----");
+            else lcd.print(F("----"));
     
             lcd.write((uint8_t)0); // print degree-symbol
             lcd.print("F");
@@ -710,7 +710,7 @@ void lcd_print_external_temperature(void)
             if (T_ext[0] < 10) lcd.print(T_ext[0], 3);
             else if ((T_ext[0] >= 10) && (T_ext[0] < 100)) lcd.print(T_ext[0], 2);
             else if (T_ext[0] >= 100) lcd.print(T_ext[0], 1);
-            else lcd.print("-----");
+            else lcd.print(F("-----"));
             lcd.print("K");
             break;
         }
@@ -783,7 +783,7 @@ void lcd_print_internal_temperature(void)
             {
                 lcd.print(T_int[1], 1);
             }
-            else lcd.print("----");
+            else lcd.print(F("----"));
 
             lcd.write((uint8_t)0); // print degree-symbol
             lcd.print("C");
@@ -810,7 +810,7 @@ void lcd_print_internal_temperature(void)
             {
                 lcd.print(T_int[2], 1);
             }
-            else lcd.print("----");
+            else lcd.print(F("----"));
     
             lcd.write((uint8_t)0); // print degree-symbol
             lcd.print("F");
@@ -822,7 +822,7 @@ void lcd_print_internal_temperature(void)
             if (T_int[0] < 10) lcd.print(T_int[0], 3);
             else if ((T_int[0] >= 10) && (T_int[0] < 100)) lcd.print(T_int[0], 2);
             else if (T_int[0] >= 100) lcd.print(T_int[0], 1);
-            else lcd.print("-----");
+            else lcd.print(F("-----"));
             lcd.print("K");
             break;
         }
@@ -931,22 +931,39 @@ void lcd_update(void)
     // Print timer information
     if (!service_mode)
     {
-        t = remaining_time / 1000; // remaining time in seconds
-        h = t / 3600; // how many integer hours are in these seconds
-        t = t % 3600; // remove integer hours, keep remainder
-        m = t / 60; // how many integer minutes are in these seconds
-        s = t % 60; // remove minutes, keep remainder for final seconds value
+        if (wpump_interval != 0)
+        {
+            t = remaining_time / 1000; // remaining time in seconds
 
-        lcd.setCursor(7, 2);
-        if (h < 10) lcd.print("0");
-        lcd.print(h);
-        lcd.print(":");
-        if (m < 10) lcd.print("0");
-        lcd.print(m);
-        lcd.print(":");
-        if (s < 10) lcd.print("0");
-        lcd.print(s);
-        lcd.print(" left");
+            if (t <= 359999) // less or equal to 99:59:59 show countdown timer 
+            {
+                h = t / 3600; // how many integer hours are in these seconds
+                t = t % 3600; // remove integer hours, keep remainder
+                m = t / 60; // how many integer minutes are in these seconds
+                s = t % 60; // remove minutes, keep remainder for final seconds value
+        
+                lcd.setCursor(7, 2);
+                if (h < 10) lcd.print("0");
+                lcd.print(h);
+                lcd.print(":");
+                if (m < 10) lcd.print("0");
+                lcd.print(m);
+                lcd.print(":");
+                if (s < 10) lcd.print("0");
+                lcd.print(s);
+                lcd.print(F(" left"));
+            }
+            else // show fixed time until it becomes less or equal to 99:59:59
+            {
+                lcd.setCursor(7, 2);
+                lcd.print(F("99:59:59 left"));
+            }
+        }
+        else // show static zero time
+        {
+            lcd.setCursor(7, 2);
+            lcd.print(F("--:--:--"));
+        }
     }
     else
     {
@@ -955,7 +972,8 @@ void lcd_update(void)
     }
 
     // Calculate the ratio of remaining_time and wpump_interval and print a progress bar
-    percent_left = (uint8_t)(round(((float)remaining_time / (float)wpump_interval) * 100.0));
+    if (wpump_interval != 0) percent_left = (uint8_t)(round(((float)remaining_time / (float)wpump_interval) * 100.0));
+    else percent_left = 100;
     lcd_print_progress_bar(percent_left);
     
 } // end of lcd_update

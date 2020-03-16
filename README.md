@@ -3,11 +3,11 @@ A modular 3D-printable hydroponic tower garden with Arduino compatible water pum
 
 **3DPrint** ~~folder contains the STL-files to print tower parts.~~ [STL-files are hosted on Thingiverse](https://www.thingiverse.com/thing:3405964)
 
-**Arduino** folder contains the source code and compiled binaries for the water pump controller written in Arduino IDE 1.8.7.
+**Arduino** folder contains the source code and compiled binaries for the water pump controller written in Arduino IDE 1.8.12.
 
 **GUI** folder contains the C# source code and compiled binary for an external computer written in Visual Studio 2019.
 
-**PCB** folder contains everything to manufacture and assemble the hardware. You can buy it on Tindie in the future.
+**PCB** folder contains everything to manufacture and assemble the hardware. You can buy it on ![Tindie](https://www.tindie.com/products/quantumframe/hydroponic-water-pump-controller-v10x/)
 
 ![MHTG empty](https://thingiverse-production-new.s3.amazonaws.com/assets/93/72/7a/2c/28/IMG_20190417_153821_02.jpg)
 
