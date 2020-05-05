@@ -37,7 +37,7 @@
 
 // Firmware date/time of compilation in 64-bit UNIX time
 // https://www.epochconverter.com/hex
-#define FW_DATE 0x000000005E9D37C1
+#define FW_DATE 0x000000005EAFDA08
 
 #define TEMP_EXT      A0 // external 10k NTC thermistor is connected to this analog pin
 #define TEMP_INT      A1 // internal 10k NTC thermistor is connected to this analog pin
@@ -654,64 +654,74 @@ void lcd_print_external_temperature(void)
         {
             lcd.setCursor(3, 1);
             
-            if ((T_ext[1] <= -10.0) || (T_ext[1] >= 100.0))
+            float TR = roundf(T_ext[1] * 100.0); // float rounded to 2 decimal places
+            TR = TR / 100.0;
+            
+            if ((TR <= -10.0) || (TR >= 100.0))
             {
                 lcd.print(" ");
-                lcd.print(T_ext[1]);
+                lcd.print(TR);
             }
-            else if ((T_ext[1] > -10.0) && (T_ext[1] < 0.0))
+            else if ((TR > -10.0) && (TR < 0.0))
             {
-               lcd.print(T_ext[1], 1);
+               lcd.print(TR, 1);
             }
-            else if ((T_ext[1] >= 0.0) && (T_ext[1] < 10.0))
+            else if ((TR >= 0.0) && (TR < 10.0))
             {
-                lcd.print(T_ext[1], 2);
+                lcd.print(TR, 2);
             }
-            else if ((T_ext[1] >= 10.0) && (T_ext[1] < 100.0))
+            else if ((TR >= 10.0) && (TR < 100.0))
             {
-                lcd.print(T_ext[1], 1);
+                lcd.print(TR, 1);
             }
             else lcd.print(F("----"));
-
+            
             lcd.write((uint8_t)0); // print degree-symbol
-            lcd.print("C  ");
+            lcd.print("C");
             break;
         }
         case 2: // Fahrenheit
         {
             lcd.setCursor(3, 1);
             
-            if ((T_ext[2] <= -10.0) || (T_ext[2] >= 100.0))
+            float TR = roundf(T_ext[2] * 100.0);  // float rounded to 2 decimal places
+            TR = TR / 100.0;
+            
+            if ((TR <= -10.0) || (TR >= 100.0))
             {
                 lcd.print(" ");
-                lcd.print(T_ext[2]);
+                lcd.print(TR);
             }
-            else if ((T_ext[2] > -10.0) && (T_ext[2] < 0.0))
+            else if ((TR > -10.0) && (TR < 0.0))
             {
-               lcd.print(T_ext[2], 1);
+               lcd.print(TR, 1);
             }
-            else if ((T_ext[2] >= 0.0) && (T_ext[2] < 10.0))
+            else if ((TR >= 0.0) && (TR < 10.0))
             {
-                lcd.print(T_ext[2], 2);
+                lcd.print(TR, 2);
             }
-            else if ((T_ext[2] >= 10.0) && (T_ext[2] < 100.0))
+            else if ((TR >= 10.0) && (TR < 100.0))
             {
-                lcd.print(T_ext[2], 1);
+                lcd.print(TR, 1);
             }
             else lcd.print(F("----"));
-    
+            
             lcd.write((uint8_t)0); // print degree-symbol
-            lcd.print("F  ");
+            lcd.print("F");
             break;
         }
         case 4: // Kelvin
         {
             lcd.setCursor(3, 1);
-            if (T_ext[0] < 10.0) lcd.print(T_ext[0], 3);
-            else if ((T_ext[0] >= 10.0) && (T_ext[0] < 100.0)) lcd.print(T_ext[0], 2);
-            else if (T_ext[0] >= 100.0) lcd.print(T_ext[0], 1);
+            
+            float TR = roundf(T_ext[0] * 100.0);  // float rounded to 2 decimal places
+            TR = TR / 100.0;
+            
+            if (TR < 10.0) lcd.print(TR, 3);
+            else if ((TR >= 10.0) && (TR < 100.0)) lcd.print(TR, 2);
+            else if (TR >= 100.0) lcd.print(TR, 1);
             else lcd.print(F("-----"));
-            lcd.print("K  ");
+            lcd.print("K");
             break;
         }
     }
@@ -765,23 +775,26 @@ void lcd_print_internal_temperature(void)
         case 1: // Celsius
         {
             lcd.setCursor(14, 1);
-    
-            if ((T_int[1] <= -10.0) || (T_int[1] >= 100.0))
+            
+            float TR = roundf(T_int[1] * 100.0);  // float rounded to 2 decimal places
+            TR = TR / 100.0;
+            
+            if ((TR <= -10.0) || (TR >= 100.0))
             {
                 lcd.print(" ");
-                lcd.print(T_int[1]);
+                lcd.print(TR);
             }
-            else if ((T_int[1] > -10.0) && (T_int[1] < 0.0))
+            else if ((TR > -10.0) && (TR < 0.0))
             {
-               lcd.print(T_int[1], 1);
+               lcd.print(TR, 1);
             }
-            else if ((T_int[1] >= 0.0) && (T_int[1] < 10.0))
+            else if ((TR >= 0.0) && (TR < 10.0))
             {
-                lcd.print(T_int[1], 2);
+                lcd.print(TR, 2);
             }
-            else if ((T_int[1] >= 10.0) && (T_int[1] < 100.0))
+            else if ((TR >= 10.0) && (TR < 100.0))
             {
-                lcd.print(T_int[1], 1);
+                lcd.print(TR, 1);
             }
             else lcd.print(F("----"));
 
@@ -792,23 +805,26 @@ void lcd_print_internal_temperature(void)
         case 2: // Fahrenheit
         {
             lcd.setCursor(14, 1);
-    
-            if ((T_int[2] <= -10.0) || (T_int[2] >= 100.0))
+            
+            float TR = roundf(T_int[2] * 100.0);  // float rounded to 2 decimal places
+            TR = TR / 100.0;
+            
+            if ((TR <= -10.0) || (TR >= 100.0))
             {
                 lcd.print(" ");
-                lcd.print(T_int[2]);
+                lcd.print(TR);
             }
-            else if ((T_int[2] > -10.0) && (T_int[2] < 0.0))
+            else if ((TR > -10.0) && (TR < 0.0))
             {
-               lcd.print(T_int[2], 1);
+               lcd.print(TR, 1);
             }
-            else if ((T_int[2] >= 0.0) && (T_int[2] < 10.0))
+            else if ((TR >= 0.0) && (TR < 10.0))
             {
-                lcd.print(T_int[2], 2);
+                lcd.print(TR, 2);
             }
-            else if ((T_int[2] >= 10.0) && (T_int[2] < 100.0))
+            else if ((TR >= 10.0) && (TR < 100.0))
             {
-                lcd.print(T_int[2], 1);
+                lcd.print(TR, 1);
             }
             else lcd.print(F("----"));
     
@@ -819,9 +835,13 @@ void lcd_print_internal_temperature(void)
         case 4: // Kelvin
         {
             lcd.setCursor(14, 1);
-            if (T_int[0] < 10.0) lcd.print(T_int[0], 3);
-            else if ((T_int[0] >= 10.0) && (T_int[0] < 100.0)) lcd.print(T_int[0], 2);
-            else if (T_int[0] >= 100.0) lcd.print(T_int[0], 1);
+            
+            float TR = roundf(T_int[0] * 100.0);  // float rounded to 2 decimal places
+            TR = TR / 100.0;
+            
+            if (TR < 10.0) lcd.print(TR, 3);
+            else if ((TR >= 10.0) && (TR < 100.0)) lcd.print(TR, 2);
+            else if (TR >= 100.0) lcd.print(TR, 1);
             else lcd.print(F("-----"));
             lcd.print("K");
             break;
