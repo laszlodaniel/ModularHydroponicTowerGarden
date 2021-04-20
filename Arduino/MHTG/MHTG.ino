@@ -30,14 +30,15 @@
 #include <math.h>
 #include <util/atomic.h>
 #include <EEPROM.h>
-#include <LiquidCrystal_I2C.h> // https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
+#include <LiquidCrystal_I2C.h> // https://github.com/fdebrabander/Arduino-LiquidCrystal-I2C-library
+#include <TimeLib.h> // https://github.com/PaulStoffregen/Time
 #include <TimerOne.h> // https://github.com/PaulStoffregen/TimerOne
 #include <Wire.h>
 
 
 // Firmware date/time of compilation in 64-bit UNIX time
 // https://www.epochconverter.com/hex
-#define FW_DATE 0x000000005EAFDA08
+#define FW_DATE 0x00000000607EEA41
 
 #define TEMP_EXT      A0 // external 10k NTC thermistor is connected to this analog pin
 #define TEMP_INT      A1 // internal 10k NTC thermistor is connected to this analog pin
@@ -81,7 +82,7 @@
 #define error_fatal                             0xFF
 
 // Construct an object called "lcd" for the external display (optional)
-LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
+LiquidCrystal_I2C lcd(0x27, 20, 4);
 
 // Variables
 uint32_t Ve, Vi; // raw analog voltage readings (external, internal temperatures)
@@ -103,12 +104,19 @@ uint8_t percent_left = 0;
 uint32_t t = 0; // remaining time is seconds
 uint8_t h, m, s; // calculated from "t": hours component (h), minutes component (m), seconds component (s)
 
+char rxBuffer[32]; // buffer for text-based communication
+uint8_t rxBufferPtr = 0;
+
 // EEPROM settings
 uint8_t eeprom_content[64];
-uint8_t default_eeprom_content[64] = { 0x00, 0xC7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                       0x00, 0x00, 0x7F, 0x00, 0x0D, 0xBB, 0xA0, 0x00, 0x0D, 0xBB, 0xA0, 0x00, 0x01, 0x0F, 0x6E, 0x01,
-                                       0xEA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+uint8_t default_eeprom_content[64] =
+{
+    0x00, 0xC7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x7F, 0x00, 0x0D, 0xBB, 0xA0, 0x00, 0x0D, 0xBB, 0xA0, 0x00, 0x01, 0x0F, 0x6E, 0x01,
+    0xEA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
 uint8_t hw_version[2] = { 0x00, 0x00 };
 uint8_t hw_date[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 uint8_t assembly_date[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
@@ -128,6 +136,7 @@ uint8_t avr_signature[3];
 
 volatile bool mode_button_pressed = false;
 bool autoupdate = true;
+bool ascii_mode = true;
 bool service_mode = false;
 uint16_t service_mode_blinking_interval = 500; // ms
 uint16_t led_blink_duration = 100; // ms
@@ -185,14 +194,14 @@ void get_temps(float *te, float *ti)
     Vi /= 500; // calculate average value
 
     // Calculate external temperature using this equation involving the thermistor's beta property
-    Ke = 1.00 / (inv_t0 + inv_beta * (log(1023.00 / (float)Ve - 1.00))); // Kelvin
+    Ke = 1.0 / (inv_t0 + inv_beta * (log(1023.0 / (float)Ve - 1.0))); // Kelvin
     Ce = Ke - 273.15; // Celsius
-    Fe = ((9.0 * Ce) / 5.00) + 32.00; // Fahrenheit
+    Fe = Ce * 1.8 + 32.0; // Fahrenheit
 
     // Calculate internal temperature using this equation involving the thermistor's beta property
-    Ki = 1.00 / (inv_t0 + inv_beta * (log(1023.00 / (float)Vi - 1.00))); // Kelvin
+    Ki = 1.0 / (inv_t0 + inv_beta * (log(1023.0 / (float)Vi - 1.0))); // Kelvin
     Ci = Ki - 273.15; // Celsius
-    Fi = ((9.0 * Ci) / 5.00) + 32.00; // Fahrenheit
+    Fi = Ci * 1.8 + 32.0; // Fahrenheit
 
     // Save values in the input arrays, disconnected sensor data is replaced by zeros
     if (Ke != 0)
@@ -533,16 +542,67 @@ void read_eeprom_settings(void)
 
 
 /*************************************************************************
+Function: write_eeprom_settings()
+Purpose:  write settings stored in RAM to internal EEPROM
+Note:     -
+**************************************************************************/
+void write_eeprom_settings(void)
+{
+    eeprom_content[0x3F] = calculate_checksum(eeprom_content, 0, 63); // re-calculate checksum
+
+    for (uint8_t i = 0; i < 64; i++) // update EEPROM (write value if different)
+    {
+        EEPROM.update(i, eeprom_content[i]);
+    }
+    
+} // end of write_eeprom_settings
+
+
+/*************************************************************************
+Function: handle_remaining_time()
+Purpose:  calculate and convert remaining seconds to time
+Note:     sprintf formatting idea commented out at the end
+**************************************************************************/
+void handle_remaining_time(void)
+{
+    remaining_time = last_wpump_millis + wpump_interval - current_millis; // milliseconds
+
+    t = remaining_time / 1000; // remaining time in seconds
+
+    if (t <= 359999) // less or equal to 99:59:59 show countdown timer 
+    {
+        h = t / 3600; // how many integer hours are in these seconds
+        t = t % 3600; // remove integer hours, keep remainder
+        m = t / 60; // how many integer minutes are in these seconds
+        s = t % 60; // remove minutes, keep remainder for final seconds value
+    }
+    else // show fixed time until it becomes less or equal to 99:59:59
+    {
+        h = 99;
+        m = 59;
+        s = 59;
+    }
+
+/*
+char buf[21];
+sprintf(buf, "%02d:%02d:%02d", h, m ,s);
+Serial.println(buf);
+*/
+    
+} // end of handle_remaining_time
+
+
+/*************************************************************************
 Function: lcd_init()
 Purpose:  initializes LCD
 Note:     -
 **************************************************************************/
 void lcd_init(void)
 {
-    lcd.begin(20, 4); // start LCD with 20 columns and 4 rows
-    lcd.backlight();  // backlight on
-    lcd.clear();      // clear display
-    lcd.home();       // set cursor in home position (0, 0)
+    lcd.begin();     // start LCD
+    lcd.backlight(); // backlight on
+    lcd.clear();     // clear display
+    lcd.home();      // set cursor in home position (0, 0)
     lcd.print(F("--------------------")); // F(" ") makes the compiler store the string inside flash memory instead of RAM, good practice if system is low on RAM
     lcd.setCursor(0, 1);
     lcd.print(F(" MODULAR HYDROPONIC "));
@@ -953,31 +1013,18 @@ void lcd_update(void)
     {
         if (wpump_interval != 0)
         {
-            t = remaining_time / 1000; // remaining time in seconds
+            handle_remaining_time();
 
-            if (t <= 359999) // less or equal to 99:59:59 show countdown timer 
-            {
-                h = t / 3600; // how many integer hours are in these seconds
-                t = t % 3600; // remove integer hours, keep remainder
-                m = t / 60; // how many integer minutes are in these seconds
-                s = t % 60; // remove minutes, keep remainder for final seconds value
-        
-                lcd.setCursor(7, 2);
-                if (h < 10) lcd.print("0");
-                lcd.print(h);
-                lcd.print(":");
-                if (m < 10) lcd.print("0");
-                lcd.print(m);
-                lcd.print(":");
-                if (s < 10) lcd.print("0");
-                lcd.print(s);
-                lcd.print(F(" left"));
-            }
-            else // show fixed time until it becomes less or equal to 99:59:59
-            {
-                lcd.setCursor(7, 2);
-                lcd.print(F("99:59:59 left"));
-            }
+            lcd.setCursor(7, 2);
+            if (h < 10) lcd.print("0");
+            lcd.print(h);
+            lcd.print(":");
+            if (m < 10) lcd.print("0");
+            lcd.print(m);
+            lcd.print(":");
+            if (s < 10) lcd.print("0");
+            lcd.print(s);
+            lcd.print(F(" left"));
         }
         else // show static zero time
         {
@@ -1121,80 +1168,233 @@ Note:     -
 ******************************************************************************/
 void update_status(void)
 {
-    // Gather data and send back to laptop (water pump state, water pump pwm-level, remaining time until state change, temperatures)
-    uint8_t status_payload[14];
-    remaining_time = last_wpump_millis + wpump_interval - current_millis;
-    uint8_t remaining_time_array[4];
-
-    if (!service_mode)
+    if (ascii_mode)
     {
-        if (wpump_interval > 0)
+        Serial.println();
+        Serial.println();
+        Serial.println(F("-----------STATUS-----------"));
+        
+        if (service_mode)
         {
-            remaining_time_array[0] = (remaining_time >> 24) & 0xFF;
-            remaining_time_array[1] = (remaining_time >> 16) & 0xFF;
-            remaining_time_array[2] = (remaining_time >> 8) & 0xFF;
-            remaining_time_array[3] = remaining_time & 0xFF;
+            Serial.println(F("Service mode : enabled"));
         }
         else
+        {
+            Serial.println(F("Service mode : disabled"));
+            Serial.flush();
+        }
+
+        if (wpump_on && !service_mode)
+        {
+            uint8_t wpump_pwm_percent = roundf((float)((wpump_pwm + 1.0) * 100.0 / 256.0));
+
+            Serial.print(F("  Water pump : on @ "));
+            Serial.print(wpump_pwm_percent);
+            Serial.println(F("%"));
+            Serial.flush();
+        }
+        else
+        {
+            Serial.println(F("  Water pump : off"));
+        }
+
+        Serial.flush();
+        Serial.print(F("       Timer : "));
+
+        if (!service_mode)
+        {
+            if (wpump_interval != 0)
+            {
+                handle_remaining_time();
+                
+                if (h < 10) Serial.print("0");
+                Serial.print(h);
+                Serial.print(":");
+                if (m < 10) Serial.print("0");
+                Serial.print(m);
+                Serial.flush();
+                Serial.print(":");
+                if (s < 10) Serial.print("0");
+                Serial.print(s);
+                Serial.println(F(" left"));
+            }
+            else // show static zero time
+            {
+                Serial.println(F("--:--:--"));
+            }
+        }
+        else
+        {
+            Serial.println(F("--:--:--"));
+        }
+        Serial.flush();
+
+        if (enabled_temperature_sensors & 0x03)
+        {
+            Serial.println(F("Temperatures"));
+
+            if (enabled_temperature_sensors & 0x01)
+            {
+                Serial.print(F("    external : "));
+                Serial.flush();
+
+                switch (temperature_unit)
+                {
+                    case 1: // Celsius
+                    {
+                        float TR = roundf(T_ext[1] * 100.0);  // float rounded to 2 decimal places
+                        TR = TR / 100.0;
+                        
+                        Serial.print(TR, 1);
+                        Serial.print(F("°C"));
+                        break;
+                    }
+                    case 2: // Fahrenheit
+                    {
+                        float TR = roundf(T_ext[2] * 100.0);  // float rounded to 2 decimal places
+                        TR = TR / 100.0;
+                        
+                        Serial.print(TR, 1);
+                        Serial.print(F("°F"));
+                        break;
+                    }
+                    case 4: // Kelvin
+                    {
+                        float TR = roundf(T_ext[0] * 100.0);  // float rounded to 2 decimal places
+                        TR = TR / 100.0;
+                        
+                        Serial.print(TR, 1);
+                        Serial.print(F("K"));
+                        break;
+                    }
+                }
+
+                Serial.println();
+                Serial.flush();
+            }
+
+            if (enabled_temperature_sensors & 0x02)
+            {
+                Serial.print(F("    internal : "));
+                Serial.flush();
+
+                switch (temperature_unit)
+                {
+                    case 1: // Celsius
+                    {
+                        float TR = roundf(T_int[1] * 100.0);  // float rounded to 2 decimal places
+                        TR = TR / 100.0;
+                        
+                        Serial.print(TR, 1);
+                        Serial.print(F("°C"));
+                        break;
+                    }
+                    case 2: // Fahrenheit
+                    {
+                        float TR = roundf(T_int[2] * 100.0);  // float rounded to 2 decimal places
+                        TR = TR / 100.0;
+                        
+                        Serial.print(TR, 1);
+                        Serial.print(F("°F"));
+                        break;
+                    }
+                    case 4: // Kelvin
+                    {
+                        float TR = roundf(T_int[0] * 100.0);  // float rounded to 2 decimal places
+                        TR = TR / 100.0;
+                        
+                        Serial.print(TR, 1);
+                        Serial.print(F("K"));
+                        break;
+                    }
+                }
+
+                Serial.println();
+                Serial.flush();
+            }
+        }
+
+        Serial.print(F("----------------------------"));
+        Serial.flush();
+    }
+    else
+    {
+        // Gather data and send back to laptop (water pump state, water pump pwm-level, remaining time until state change, temperatures)
+        uint8_t status_payload[14];
+        uint8_t remaining_time_array[4];
+
+        handle_remaining_time();
+
+        if (!service_mode)
+        {
+            if (wpump_interval > 0)
+            {
+                remaining_time_array[0] = (remaining_time >> 24) & 0xFF;
+                remaining_time_array[1] = (remaining_time >> 16) & 0xFF;
+                remaining_time_array[2] = (remaining_time >> 8) & 0xFF;
+                remaining_time_array[3] = remaining_time & 0xFF;
+            }
+            else
+            {
+                remaining_time_array[0] = 0;
+                remaining_time_array[1] = 0;
+                remaining_time_array[2] = 0;
+                remaining_time_array[3] = 0;
+            }
+        }
+        else if (service_mode)
         {
             remaining_time_array[0] = 0;
             remaining_time_array[1] = 0;
             remaining_time_array[2] = 0;
             remaining_time_array[3] = 0;
         }
-    }
-    else if (service_mode)
-    {
-        remaining_time_array[0] = 0;
-        remaining_time_array[1] = 0;
-        remaining_time_array[2] = 0;
-        remaining_time_array[3] = 0;
-    }
+        
+        status_payload[0] = 0;
+        if (wpump_on) sbi(status_payload[0], 0);
+        else cbi(status_payload[0], 0);
+        if (service_mode) sbi(status_payload[0], 1);
+        else cbi(status_payload[0], 1);
+        
+        status_payload[1] = wpump_pwm;
+        
+        status_payload[2] = remaining_time_array[0];
+        status_payload[3] = remaining_time_array[1];
+        status_payload[4] = remaining_time_array[2];
+        status_payload[5] = remaining_time_array[3];
+        
+        if (enabled_temperature_sensors & 0x01) // external temperature sensor
+        {
+            status_payload[6] = temperature_payload[0];
+            status_payload[7] = temperature_payload[1];
+            status_payload[8] = temperature_payload[2];
+            status_payload[9] = temperature_payload[3];
+        }
+        else
+        {
+            status_payload[6] = 0;
+            status_payload[7] = 0;
+            status_payload[8] = 0;
+            status_payload[9] = 0;
+        }
     
-    status_payload[0] = 0;
-    if (wpump_on) sbi(status_payload[0], 0);
-    else cbi(status_payload[0], 0);
-    if (service_mode) sbi(status_payload[0], 1);
-    else cbi(status_payload[0], 1);
-    
-    status_payload[1] = wpump_pwm;
-    
-    status_payload[2] = remaining_time_array[0];
-    status_payload[3] = remaining_time_array[1];
-    status_payload[4] = remaining_time_array[2];
-    status_payload[5] = remaining_time_array[3];
-    
-    if (enabled_temperature_sensors & 0x01) // external temperature sensor
-    {
-        status_payload[6] = temperature_payload[0];
-        status_payload[7] = temperature_payload[1];
-        status_payload[8] = temperature_payload[2];
-        status_payload[9] = temperature_payload[3];
+        if (enabled_temperature_sensors & 0x02) // internal temperature sensor
+        {
+            status_payload[10] = temperature_payload[4];
+            status_payload[11] = temperature_payload[5];
+            status_payload[12] = temperature_payload[6];
+            status_payload[13] = temperature_payload[7];
+        }
+        else
+        {
+            status_payload[10] = 0;
+            status_payload[11] = 0;
+            status_payload[12] = 0;
+            status_payload[13] = 0;
+        }
+        
+        send_usb_packet(status, ok, status_payload, 14);
     }
-    else
-    {
-        status_payload[6] = 0;
-        status_payload[7] = 0;
-        status_payload[8] = 0;
-        status_payload[9] = 0;
-    }
-
-    if (enabled_temperature_sensors & 0x02) // internal temperature sensor
-    {
-        status_payload[10] = temperature_payload[4];
-        status_payload[11] = temperature_payload[5];
-        status_payload[12] = temperature_payload[6];
-        status_payload[13] = temperature_payload[7];
-    }
-    else
-    {
-        status_payload[10] = 0;
-        status_payload[11] = 0;
-        status_payload[12] = 0;
-        status_payload[13] = 0;
-    }
-    
-    send_usb_packet(status, ok, status_payload, 14);
     
 } // end of update_status
 
@@ -1255,8 +1455,10 @@ void handle_usb_data(void)
     {
         uint8_t sync = Serial.read(); // read the next available byte in the USB receive buffer, it's supposed to be the first byte of a message
 
-        if (sync == 0x3D)
+        if (sync == 0x3D) // packet-based communication
         {
+            ascii_mode = false;
+            
             uint8_t length_hb, length_lb, datacode, subdatacode, checksum;
             bool payload_bytes = false;
             uint16_t bytes_to_read = 0;
@@ -1386,11 +1588,12 @@ void handle_usb_data(void)
                         case 0x01: // read settings, a proportion of the internal EEPROM
                         {
                             uint8_t settings_payload[15];
+
                             for (uint8_t i = 0; i < 15; i++) // copy the last 14 bytes from the current eeprom_content array
                             {
                                 settings_payload[i] = eeprom_content[0x12 + i];
                             }
-                            
+
                             send_usb_packet(settings, 0x01, settings_payload, 15);
                             break;
                         }
@@ -1407,14 +1610,8 @@ void handle_usb_data(void)
                                 eeprom_content[0x12 + i] = cmd_payload[i];
                             }
 
-                            eeprom_content[0x3F] = calculate_checksum(eeprom_content, 0, 63); // re-calculate checksum
-
-                            for (uint8_t i = 0; i < 64; i++) // update EEPROM (write value if different)
-                            {
-                                EEPROM.update(i, eeprom_content[i]);
-                            }
-
-                            update_settings(); // update settings in RAM
+                            write_eeprom_settings();
+                            update_settings(); // actualize settings
                             send_usb_packet(settings, 0x02, ack, 1);
                             break;
                         }
@@ -1454,7 +1651,7 @@ void handle_usb_data(void)
                             else // exit service mode
                             {
                                 service_mode = false; // exit service mode
-                    
+
                                 if (wpump_on) // if water pump is on according to the timer
                                 {
                                     wpump_on = true;
@@ -1608,16 +1805,9 @@ void handle_usb_data(void)
                             // Update the local RAM-copy of the EEPROM
                             eeprom_content[0x1F] = cmd_payload[0];
                             eeprom_content[0x20] = cmd_payload[1];
-                            eeprom_content[0x3F] = calculate_checksum(eeprom_content, 0, 63);
-
-                            // Update values in the EEPROM too
-                            EEPROM.update(0x1F, cmd_payload[0]);
-                            EEPROM.update(0x20, cmd_payload[1]);
-                            EEPROM.update(0x3F, eeprom_content[0x3F]);
-
-                            // Update frequency and restart water pump
-                            uint16_t frequency = to_uint16(cmd_payload[0], cmd_payload[1]);
-                            update_pwm_frequency(frequency);
+                            
+                            write_eeprom_settings(); // write settings to internal EEPROM
+                            update_settings(); // actualize settings
 
                             send_usb_packet(debug, 0x03, ack, 1);
                             break;
@@ -1637,16 +1827,653 @@ void handle_usb_data(void)
                 }
             }
         }
-        else // if it's not a sync byte
+        else // text-based communication
         {
-            Serial.read(); // remove this byte from buffer and try again in the next loop
+            if ((sync != '\n') && (sync != '\r')) // filter out blank lines
+            {
+                ascii_mode = true;
+                
+                rxBuffer[0] = sync; // store first character before further reading
+                rxBuffer[1] = '\0';
+                rxBufferPtr = 1;
+    
+                delay(50); // wait a little for the rest of the characters to arrive
+                
+                while (Serial.available())
+                {
+                    char c = Serial.read(); // read next character
+                    
+                    if ((c != '\n') && (c != '\r') && (rxBufferPtr < (sizeof(rxBuffer) - 1)))
+                    {
+                        rxBuffer[rxBufferPtr] = c; // store character
+                        rxBufferPtr++; // increment pointer value
+                        rxBuffer[rxBufferPtr] = '\0'; // insert string termination character after the current character
+                    }
+                    else
+                    {
+                        while (Serial.available()) Serial.read(); // read remaining characters into oblivion
+                    }
+                }
+
+                char command[32];
+                char value[32];
+                uint32_t valueNumeric = 0;
+                uint8_t delimiterPos = 0;
+                bool valuePresent = false;
+    
+                for (uint8_t i = 0; i < rxBufferPtr; i++) // find '=' symbol
+                {
+                    if (rxBuffer[i] == '=')
+                    {
+                        delimiterPos = i;
+                        break;
+                    }
+                }
+    
+                if (delimiterPos != 0) // command and value are both present
+                {
+                    valuePresent = true;
+                    uint8_t valuePos = delimiterPos + 1;
+                    uint8_t valueLen = rxBufferPtr - valuePos;
+
+                    for (uint8_t i = 0; i < delimiterPos; i++)
+                    {
+                        command[i] = rxBuffer[i];
+                    }
+
+                    command[delimiterPos] = '\0';
+
+                    for (uint8_t i = 0; i < valueLen; i++)
+                    {
+                        value[i] = rxBuffer[valuePos + i];
+                    }
+
+                    value[valueLen] = '\0';
+                    valueNumeric = atoi(value);
+                }
+                else // only command is present
+                {
+                    valuePresent = false;
+    
+                    for (uint8_t i = 0; i < rxBufferPtr ; i++)
+                    {
+                        command[i] = rxBuffer[i];
+                    }
+    
+                    command[rxBufferPtr] = '\0';
+                }
+
+                Serial.println();
+                Serial.println();
+                Serial.print(F("Input: "));
+                Serial.println(rxBuffer);
+                Serial.flush();
+                Serial.print(F("Command: "));
+                Serial.print(command);
+    
+                if (valuePresent)
+                {
+                    Serial.println();
+                    Serial.print(F("Value: "));
+                    Serial.print(valueNumeric);
+                }
+
+                Serial.flush();
+
+                if ((strcmp(command, "help") == 0) || (strcmp(command, "HELP") == 0)) // print command descriptions to the Serial Monitor
+                {
+                    Serial.println();
+                    Serial.println();
+                    Serial.flush();
+                    Serial.println(F("----------------------------------HELP---------------------------------"));
+                    Serial.println(F("         help : print this description."));
+                    Serial.println(F("      restart : restart controller."));
+                    Serial.flush();
+                    Serial.println(F("         info : print controller information."));
+                    Serial.println(F("servicemode=X : set service mode,"));
+                    Serial.println(F("                X=0: disabled (default),"));
+                    Serial.flush();
+                    Serial.println(F("                X=1: enabled."));
+                    Serial.println(F("     status=X : print regular status updates,"));
+                    Serial.println(F("                X=0: disabled,"));
+                    Serial.flush();
+                    Serial.println(F("                X=1: enabled (default)."));
+                    Serial.println(F("  pumpspeed=X : set water pump speed in percents,"));
+                    Serial.println(F("                X=0...100 [%]."));
+                    Serial.flush();
+                    Serial.println(F("     ontime=X : set water pump on-time in minutes,"));
+                    Serial.println(F("                X=0...71582 [min],"));
+                    Serial.println(F("                when set to 0 the water pump is permanently turned off."));
+                    Serial.flush();
+                    Serial.println(F("    offtime=X : set water pump off-time in minutes,"));
+                    Serial.println(F("                X=0...71582 [min],"));
+                    Serial.println(F("                when set to 0 the water pump is permanently turned on."));
+                    Serial.flush();
+                    Serial.println(F("tempsensors=X : set temperature sensor configuration,"));
+                    Serial.println(F("                X=0: none (default),"));
+                    Serial.println(F("                X=1: external,"));
+                    Serial.flush();
+                    Serial.println(F("                X=2: internal,"));
+                    Serial.println(F("                X=3: both external and internal."));
+                    Serial.println(F("   tempunit=X : set temperature unit,"));
+                    Serial.flush();
+                    Serial.println(F("                X=1: Celsius (default),"));
+                    Serial.println(F("                X=2: Fahrenheit,"));
+                    Serial.println(F("                X=4: Kelvin."));
+                    Serial.flush();
+                    Serial.println(F("    ntcbeta=X : set temperature sensor beta value in Kelvin,"));
+                    Serial.println(F("                X=3950 [K] by default."));
+                    Serial.println(F("    pwmfreq=X : set water pump driver PWM frequency in Hertz,"));
+                    Serial.flush();
+                    Serial.println(F("                X=490 [Hz] by default."));
+                    Serial.println();
+                    Serial.println(F("Note: settings are automatically saved to the internal EEPROM."));
+                    Serial.print(F("-----------------------------------------------------------------------"));
+                    Serial.flush();
+                    
+                }
+                else if ((strcmp(command, "restart") == 0) || (strcmp(command, "RESTART") == 0)) // restart controller
+                {
+                    Serial.println();
+                    Serial.print(F("Result: restarting controller now, please wait."));
+                    while(true); // enter into infinite loop, wait for watchdog reset
+                }
+                else if ((strcmp(command, "info") == 0) || (strcmp(command, "INFO") == 0)) // print controller information to the Serial Monitor
+                {
+                    Serial.println();
+                    Serial.println();
+                    Serial.flush();
+                    Serial.println(F("--------------------INFO---------------------"));
+                    Serial.print(F("        AVR signature : "));
+                    Serial.flush();
+                    
+                    for (uint8_t i = 0; i < sizeof(avr_signature); i++)
+                    {
+                        if (avr_signature[i] < 16) Serial.print("0"); // print leading zero
+                        Serial.print(avr_signature[i], HEX); // print signature byte in hexadecimal format
+                        Serial.print(" "); // insert whitespace between bytes
+                    }
+
+                    Serial.flush();
+
+                    if ((avr_signature[0] == 0x1E) && (avr_signature[1] == 0x95) && (avr_signature[2] == 0x0F))
+                    {
+                        Serial.println(F("(ATmega328P)"));
+                    }
+                    else
+                    {
+                        Serial.println(F("(unknown microcontroller)"));
+                    }
+
+                    Serial.print(F("     Hardware version : V"));
+                    float HWVersion = to_uint16(hw_version[0], hw_version[1]) / 100.0;
+                    Serial.println(HWVersion, 2);
+                    Serial.flush();
+
+                    time_t hardwareDate = to_uint32(hw_date[4], hw_date[5], hw_date[6], hw_date[7]);
+                    setTime(hardwareDate);
+                    Serial.print(F("        Hardware date : "));
+                    Serial.print(year());
+                    Serial.print(F("."));
+                    Serial.flush();
+                    if (month() < 10) Serial.print(F("0"));
+                    Serial.print(month());
+                    Serial.print(F("."));
+                    Serial.flush();
+                    if (day() < 10) Serial.print(F("0"));
+                    Serial.print(day());
+                    Serial.print(F(" "));
+                    Serial.flush();
+                    if (hour() < 10) Serial.print(F("0"));
+                    Serial.print(hour());
+                    Serial.print(F(":"));
+                    Serial.flush();
+                    if (minute() < 10) Serial.print(F("0"));
+                    Serial.print(minute());
+                    Serial.print(F(":"));
+                    Serial.flush();
+                    if (second() < 10) Serial.print(F("0"));
+                    Serial.println(second());
+
+                    time_t assemblyDate = to_uint32(assembly_date[4], assembly_date[5], assembly_date[6], assembly_date[7]);
+                    setTime(assemblyDate);
+                    Serial.print(F("        Assembly date : "));
+                    Serial.print(year());
+                    Serial.print(F("."));
+                    Serial.flush();
+                    if (month() < 10) Serial.print(F("0"));
+                    Serial.print(month());
+                    Serial.print(F("."));
+                    Serial.flush();
+                    if (day() < 10) Serial.print(F("0"));
+                    Serial.print(day());
+                    Serial.print(F(" "));
+                    Serial.flush();
+                    if (hour() < 10) Serial.print(F("0"));
+                    Serial.print(hour());
+                    Serial.print(F(":"));
+                    Serial.flush();
+                    if (minute() < 10) Serial.print(F("0"));
+                    Serial.print(minute());
+                    Serial.print(F(":"));
+                    Serial.flush();
+                    if (second() < 10) Serial.print(F("0"));
+                    Serial.println(second());
+
+                    time_t firmwareDate = FW_DATE & 0xFFFFFFFF;
+                    setTime(firmwareDate);
+                    Serial.print(F("        Firmware date : "));
+                    Serial.print(year());
+                    Serial.print(F("."));
+                    Serial.flush();
+                    if (month() < 10) Serial.print(F("0"));
+                    Serial.print(month());
+                    Serial.print(F("."));
+                    Serial.flush();
+                    if (day() < 10) Serial.print(F("0"));
+                    Serial.print(day());
+                    Serial.print(F(" "));
+                    Serial.flush();
+                    if (hour() < 10) Serial.print(F("0"));
+                    Serial.print(hour());
+                    Serial.print(F(":"));
+                    Serial.flush();
+                    if (minute() < 10) Serial.print(F("0"));
+                    Serial.print(minute());
+                    Serial.print(F(":"));
+                    Serial.flush();
+                    if (second() < 10) Serial.print(F("0"));
+                    Serial.println(second());
+
+                    if (service_mode)
+                    {
+                        Serial.println(F("         Service mode : enabled"));
+                    }
+                    else
+                    {
+                        Serial.println(F("         Service mode : disabled"));
+                        Serial.flush();
+                    }
+
+                    Serial.flush();
+            
+                    if (wpump_on && !service_mode)
+                    {
+                        uint8_t wpump_pwm_percent = roundf((float)((wpump_pwm + 1.0) * 100.0 / 256.0));
+            
+                        Serial.print(F("     Water pump state : on @ "));
+                        Serial.print(wpump_pwm_percent);
+                        Serial.println(F("%"));
+                        Serial.flush();
+                    }
+                    else
+                    {
+                        Serial.println(F("     Water pump state : off"));
+                    }
+
+                    Serial.flush();
+
+                    Serial.print(F("   Water pump on-time : "));
+                    Serial.print(wpump_ontime / 60000);
+                    Serial.println(F(" minute(s)"));
+                    Serial.flush();
+                    Serial.print(F("  Water pump off-time : "));
+                    Serial.print(wpump_offtime / 60000);
+                    Serial.println(F(" minute(s)"));
+                    Serial.flush();
+                    
+                    Serial.print(F("Temperature sensor(s) : "));
+
+                    if ((enabled_temperature_sensors & 0x03) == 0) Serial.println(F("none"));
+                    else if ((enabled_temperature_sensors & 0x03) == 1) Serial.println(F("external"));
+                    else if ((enabled_temperature_sensors & 0x03) == 2) Serial.println(F("internal"));
+                    else if ((enabled_temperature_sensors & 0x03) == 3) Serial.println(F("external and internal"));
+                    else Serial.println(F("N/A"));
+                    Serial.flush();
+                    
+                    Serial.print(F("     Temperature unit : "));
+
+                    if ((temperature_unit & 0x07) == 1) Serial.println(F("Celsius"));
+                    else if ((temperature_unit & 0x07) == 2) Serial.println(F("Fahrenheit"));
+                    else if ((temperature_unit & 0x07) == 4) Serial.println(F("Kelvin"));
+                    else Serial.println(F("N/A"));
+                    Serial.flush();
+
+                    Serial.print(F("       NTC beta value : "));
+                    Serial.print(beta);
+                    Serial.println(F(" K"));
+                    Serial.flush();
+
+                    Serial.print(F("        PWM frequency : "));
+                    Serial.print(pwm_frequency);
+                    Serial.println(F(" Hz"));
+                    Serial.flush();
+                    Serial.print(F("---------------------------------------------"));
+                    Serial.flush();
+                }
+                else if ((strcmp(command, "servicemode") == 0) || (strcmp(command, "SERVICEMODE") == 0)) // set service mode
+                {
+                    if (!valuePresent)
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: error!"));
+                        Serial.flush();
+                        return;
+                    }
+
+                    if (valueNumeric == 0)
+                    {
+                        service_mode = false;
+                        Serial.println();
+                        Serial.print(F("Result: service mode disabled, water pump is controlled by the timer."));
+                    }
+                    else if (valueNumeric == 1)
+                    {
+                        service_mode = true;
+                        Serial.println();
+                        Serial.print(F("Result: service mode enabled, water pump is temporary turned off."));
+                    }
+                    else
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: invalid value!"));
+                    }
+
+                    Serial.flush();
+                }
+                else if ((strcmp(command, "status") == 0) || (strcmp(command, "STATUS") == 0)) // print regular status updates on the Serial Monitor
+                {
+                    if (!valuePresent)
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: error!"));
+                        Serial.flush();
+                        return;
+                    }
+
+                    if (valueNumeric == 0)
+                    {
+                        autoupdate = false;
+                        Serial.println();
+                        Serial.print(F("Result: regular status updates disabled."));
+                    }
+                    else if (valueNumeric == 1)
+                    {
+                        autoupdate = true;
+                        Serial.println();
+                        Serial.print(F("Result: regular status update enabled."));
+                    }
+                    else
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: invalid value!"));
+                    }
+
+                    Serial.flush();
+                }
+                else if ((strcmp(command, "pumpspeed") == 0) || (strcmp(command, "PUMPSPEED") == 0)) // set water pump speed (0-100%)
+                {
+                    if (!valuePresent)
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: error!"));
+                        Serial.flush();
+                        return;
+                    }
+
+                    if ((valueNumeric >=0) && (valueNumeric <= 100))
+                    {
+                        Serial.println();
+                        Serial.print(F("Note: please wait while the water pump speed is changing."));
+                        
+                        if (valueNumeric > 0 ) eeprom_content[0x12] = (uint8_t)(valueNumeric * 256 / 100 - 1);
+                        else eeprom_content[0x12] = 0;
+                        write_eeprom_settings();
+                        update_settings(); // actualize settings, ramp up or down the water pump driver
+
+                        Serial.println();
+                        Serial.print(F("Result: water pump speed changed to "));
+                        Serial.print(valueNumeric);
+                        Serial.print(F("%."));
+                    }
+                    else
+                    {
+                        uint8_t wpump_pwm_percent = roundf((float)((wpump_pwm + 1.0) * 100.0 / 256.0));
+
+                        Serial.println();
+                        Serial.print(F("Result: invalid value! Water pump speed remains at "));
+                        Serial.print(wpump_pwm_percent);
+                        Serial.print(F("%."));
+                    }
+
+                    Serial.flush();
+                }
+                else if ((strcmp(command, "ontime") == 0) || (strcmp(command, "ONTIME") == 0)) // set water pump on-time
+                {
+                    if (!valuePresent)
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: error!"));
+                        Serial.flush();
+                        return;
+                    }
+
+                    if ((valueNumeric >=0) && (valueNumeric <= 71582))
+                    {
+                        uint32_t t = valueNumeric * 60000; // milliseconds
+                        eeprom_content[0x13] = (t >> 24) & 0xFF;
+                        eeprom_content[0x14] = (t >> 16) & 0xFF;
+                        eeprom_content[0x15] = (t >> 8) & 0xFF;
+                        eeprom_content[0x16] = t & 0xFF;
+                        write_eeprom_settings();
+                        update_settings(); // actualize settings
+
+                        Serial.println();
+                        Serial.print(F("Result: water pump on-time changed to "));
+                        Serial.print(valueNumeric);
+                        Serial.print(F(" minute(s)."));
+                    }
+                    else
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: invalid value! Water pump on-time must be less than 71582 minutes."));
+                    }
+
+                    Serial.flush();
+                }
+                else if ((strcmp(command, "offtime") == 0) || (strcmp(command, "OFFTIME") == 0)) // set water pump off-time
+                {
+                    if (!valuePresent)
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: error!"));
+                        Serial.flush();
+                        return;
+                    }
+
+                    if ((valueNumeric >=0) && (valueNumeric <= 71582))
+                    {
+                        uint32_t t = valueNumeric * 60000; // milliseconds
+                        eeprom_content[0x17] = (t >> 24) & 0xFF;
+                        eeprom_content[0x18] = (t >> 16) & 0xFF;
+                        eeprom_content[0x19] = (t >> 8) & 0xFF;
+                        eeprom_content[0x1A] = t & 0xFF;
+                        write_eeprom_settings();
+                        update_settings(); // actualize settings
+
+                        Serial.println();
+                        Serial.print(F("Result: water pump off-time changed to "));
+                        Serial.print(valueNumeric);
+                        Serial.print(F(" minute(s)."));
+                    }
+                    else
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: invalid value! Water pump off-time must be less than 71582 minutes."));
+                    }
+
+                    Serial.flush();
+                }
+                else if ((strcmp(command, "tempsensors") == 0) || (strcmp(command, "TEMPSENSORS") == 0)) // set temperature sensor configuration
+                {
+                    if (!valuePresent)
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: error!"));
+                        Serial.flush();
+                        return;
+                    }
+
+                    if ((valueNumeric >= 0) && (valueNumeric <= 3))
+                    {
+                        eeprom_content[0x1B] = valueNumeric;
+                        write_eeprom_settings();
+                        update_settings(); // actualize settings
+
+                        if (valueNumeric == 0)
+                        {
+                            Serial.println();
+                            Serial.print(F("Result: temperature sensor configuration is set to none."));
+                        }
+                        else if (valueNumeric == 1)
+                        {
+                            Serial.println();
+                            Serial.print(F("Result: temperature sensor configuration is set to external sensor only."));
+                        }
+                        else if (valueNumeric == 2)
+                        {
+                            Serial.println();
+                            Serial.print(F("Result: temperature sensor configuration is set to internal sensor only."));
+                        }
+                        else if (valueNumeric == 3)
+                        {
+                            Serial.println();
+                            Serial.print(F("Result: temperature sensor configuration is set to both external and internal sensors."));
+                        }
+                    }
+                    else
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: invalid value!"));
+                    }
+
+                    Serial.flush();
+                }
+                else if ((strcmp(command, "tempunit") == 0) || (strcmp(command, "TEMPUNIT") == 0)) // set temperature unit
+                {
+                    if (!valuePresent)
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: error!"));
+                        Serial.flush();
+                        return;
+                    }
+
+                    if (((valueNumeric & 0x07) >= 1) && ((valueNumeric & 0x07) <= 4) && ((valueNumeric & 0x07) != 3))
+                    {
+                        eeprom_content[0x1C] = valueNumeric;
+                        write_eeprom_settings();
+                        update_settings(); // actualize settings
+
+                        if (valueNumeric == 1)
+                        {
+                            Serial.println();
+                            Serial.print(F("Result: temperature unit set to Celsius."));
+                        }
+                        else if (valueNumeric == 2)
+                        {
+                            Serial.println();
+                            Serial.print(F("Result: temperature unit set to Fahrenheit."));
+                        }
+                        else if (valueNumeric == 4)
+                        {
+                            Serial.println();
+                            Serial.print(F("Result: temperature unit set to Kelvin."));
+                        }
+                    }
+                    else
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: invalid value!"));
+                    }
+
+                    Serial.flush();
+                }
+                else if ((strcmp(command, "ntcbeta") == 0) || (strcmp(command, "NTCBETA") == 0)) // set NTC beta value
+                {
+                    if (!valuePresent)
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: error!"));
+                        Serial.flush();
+                        return;
+                    }
+
+                    if (valueNumeric > 0)
+                    {
+                        eeprom_content[0x1D] = (valueNumeric >> 8) & 0xFF;
+                        eeprom_content[0x1E] = valueNumeric & 0xFF;
+                        write_eeprom_settings();
+                        update_settings(); // actualize settings
+
+                        Serial.println();
+                        Serial.print(F("Result: NTC beta value changed to "));
+                        Serial.print(valueNumeric);
+                        Serial.print(F(" K."));
+                    }
+                    else
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: invalid value! NTC beta value must be greater than 0."));
+                    }
+
+                    Serial.flush();
+                }
+                else if ((strcmp(command, "pwmfreq") == 0) || (strcmp(command, "PWMFREQ") == 0)) // set PWM frequency
+                {
+                    if (!valuePresent)
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: error!"));
+                        Serial.flush();
+                        return;
+                    }
+
+                    if (valueNumeric > 0)
+                    {
+                        eeprom_content[0x1F] = (valueNumeric >> 8) & 0xFF;
+                        eeprom_content[0x20] = valueNumeric & 0xFF;
+                        write_eeprom_settings();
+                        update_settings(); // actualize settings
+
+                        Serial.println();
+                        Serial.print(F("Result: PWM frequency changed to "));
+                        Serial.print(valueNumeric);
+                        Serial.print(F(" Hz."));
+                    }
+                    else
+                    {
+                        Serial.println();
+                        Serial.print(F("Result: invalid value! PWM frequency must be greater than 0."));
+                    }
+
+                    Serial.flush();
+                }
+                else
+                {
+                    Serial.println();
+                    Serial.print(F("Result: unknown command!"));
+                }
+
+                Serial.flush();
+            }
         }
     }
     else
     {
         // what TODO if nothing is in the serial receive buffer
     }
-     
+
 } // end of handle_usb_data
 
 
@@ -1676,7 +2503,7 @@ void loop()
     handle_usb_data();
     current_millis = millis(); // check current time
 
-    if ((current_millis - last_wpump_millis >= wpump_interval) && (current_millis > last_wpump_millis) && (wpump_ontime != 0) && (wpump_offtime != 0))
+    if (((uint32_t)(current_millis - last_wpump_millis) >= wpump_interval) && (wpump_ontime != 0) && (wpump_offtime != 0)) // casting the time difference to uint32_t is a workaround for millis timer overflow that occurs every 50 days or so
     {
         last_wpump_millis = current_millis; // save the last time we were here
         
@@ -1693,12 +2520,8 @@ void loop()
             if (!service_mode) change_wpump_speed(wpump_pwm);
         }
     }
-    else if (current_millis < last_wpump_millis) // be prepared if the millis counter overflows every month or so
-    {
-        last_wpump_millis = 0;
-    }
 
-    if (current_millis - last_update_millis >= update_interval)
+    if ((uint32_t)(current_millis - last_update_millis) >= update_interval) // casting the time difference to uint32_t is a workaround for millis timer overflow that occurs every 50 days or so
     {     
         last_update_millis = current_millis; // save the last time we were here
         get_temps(T_ext, T_int); // measure temperatures and save them in these arrays
@@ -1708,10 +2531,6 @@ void loop()
             update_status();
             lcd_update();
         }
-    }
-    else if (current_millis < last_update_millis) // be prepared if the millis counter overflows every month or so
-    {
-        last_update_millis = 0;
     }
 
     if (mode_button_pressed) // handle mode-button press
