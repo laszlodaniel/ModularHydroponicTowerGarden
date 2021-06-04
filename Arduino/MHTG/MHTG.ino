@@ -1,9 +1,9 @@
 /*
  * ModularHydroponicTowerGarden (https://github.com/laszlodaniel/ModularHydroponicTowerGarden)
- * Copyright (C) 2020, László Dániel
+ * Copyright (C) 2021, Daniel Laszlo
  *
  * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
+ * it under the terms of the GNU General Public License as published bypr
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  *
@@ -15,13 +15,6 @@
  * You should have received a copy of the GNU General Public License
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
-
-// Board: Arduino/Genuino Uno
-// Fuse bytes:
-// - LF: 0xFF
-// - HF: 0xD6
-// - EF: 0xFD
-// - Lock: 0x3F
 
 #include <avr/io.h>
 #include <avr/boot.h>
@@ -38,7 +31,7 @@
 
 // Firmware date/time of compilation in 64-bit UNIX time
 // https://www.epochconverter.com/hex
-#define FW_DATE 0x00000000607EEA41
+#define FW_DATE 0x0000000060BA2885
 
 #define TEMP_EXT      A0 // external 10k NTC thermistor is connected to this analog pin
 #define TEMP_INT      A1 // internal 10k NTC thermistor is connected to this analog pin
@@ -139,7 +132,7 @@ bool autoupdate = true;
 bool ascii_mode = true;
 bool service_mode = false;
 uint16_t service_mode_blinking_interval = 500; // ms
-uint16_t led_blink_duration = 100; // ms
+uint16_t led_blink_duration = 50; // ms
 uint32_t previous_led_blink = 0; // ms
 uint32_t red_led_ontime = 0; // ms
 
@@ -176,22 +169,23 @@ void get_temps(float *te, float *ti)
 {
     float Ke, Ce, Fe; // external temperature variables
     float Ki, Ci, Fi; // internal temperature variables
+    uint16_t sampleCount = 512;
 
     Ve = 0; // start with zero
     Vi = 0; // start with zero
 
-    for (uint16_t i = 0; i < 500; i++) // measure analog voltage quickly 500 times and add results together
+    for (uint16_t i = 0; i < sampleCount; i++) // measure analog voltage quickly 500 times and add results together
     {
         Ve += analogRead(TEMP_EXT);
     }
 
-    for (uint16_t i = 0; i < 500; i++) // measure analog voltage quickly 500 times and add results together
+    for (uint16_t i = 0; i < sampleCount; i++) // measure analog voltage quickly 500 times and add results together
     {
         Vi += analogRead(TEMP_INT);
     }
 
-    Ve /= 500; // calculate average value
-    Vi /= 500; // calculate average value
+    Ve /= sampleCount; // calculate average value
+    Vi /= sampleCount; // calculate average value
 
     // Calculate external temperature using this equation involving the thermistor's beta property
     Ke = 1.0 / (inv_t0 + inv_beta * (log(1023.0 / (float)Ve - 1.0))); // Kelvin
@@ -203,32 +197,14 @@ void get_temps(float *te, float *ti)
     Ci = Ki - 273.15; // Celsius
     Fi = Ci * 1.8 + 32.0; // Fahrenheit
 
-    // Save values in the input arrays, disconnected sensor data is replaced by zeros
-    if (Ke != 0)
-    {
-        te[0] = Ke;
-        te[1] = Ce;
-        te[2] = Fe;
-    }
-    else
-    {
-        te[0] = 0;
-        te[1] = 0;
-        te[2] = 0;
-    }
+    // Save values in the input arrays
+    te[0] = Ke;
+    te[1] = Ce;
+    te[2] = Fe;
 
-    if (Ki != 0)
-    {
-        ti[0] = Ki;
-        ti[1] = Ci;
-        ti[2] = Fi;
-    }
-    else
-    {
-        ti[0] = 0;
-        ti[1] = 0;
-        ti[2] = 0;
-    }
+    ti[0] = Ki;
+    ti[1] = Ci;
+    ti[2] = Fi;
 
     // Save float values as their 4-byte constituents
     switch (temperature_unit)
@@ -666,7 +642,7 @@ void lcd_print_progress_bar(uint8_t percent)
         {
             case 0:
             {
-                lcd.print(" ");
+                lcd.print(F(" "));
                 break;
             }
             case 1:
@@ -694,7 +670,7 @@ void lcd_print_progress_bar(uint8_t percent)
         // Blank space to the end of the line
         for (uint8_t i = 0; i < (19 - counter); i++)
         {
-            lcd.print(" ");
+            lcd.print(F(" "));
         }
     }
     
@@ -716,13 +692,8 @@ void lcd_print_external_temperature(void)
             
             float TR = roundf(T_ext[1] * 100.0); // float rounded to 2 decimal places
             TR = TR / 100.0;
-            
-            if ((TR <= -10.0) || (TR >= 100.0))
-            {
-                lcd.print(" ");
-                lcd.print(TR);
-            }
-            else if ((TR > -10.0) && (TR < 0.0))
+
+            if ((TR > -10.0) && (TR < 0.0))
             {
                lcd.print(TR, 1);
             }
@@ -734,10 +705,10 @@ void lcd_print_external_temperature(void)
             {
                 lcd.print(TR, 1);
             }
-            else lcd.print(F("----"));
+            else lcd.print(F("----")); // temperature is out of normal range
             
             lcd.write((uint8_t)0); // print degree-symbol
-            lcd.print("C");
+            lcd.print(F("C"));
             break;
         }
         case 2: // Fahrenheit
@@ -746,13 +717,8 @@ void lcd_print_external_temperature(void)
             
             float TR = roundf(T_ext[2] * 100.0);  // float rounded to 2 decimal places
             TR = TR / 100.0;
-            
-            if ((TR <= -10.0) || (TR >= 100.0))
-            {
-                lcd.print(" ");
-                lcd.print(TR);
-            }
-            else if ((TR > -10.0) && (TR < 0.0))
+
+            if ((TR > -10.0) && (TR < 0.0))
             {
                lcd.print(TR, 1);
             }
@@ -764,10 +730,10 @@ void lcd_print_external_temperature(void)
             {
                 lcd.print(TR, 1);
             }
-            else lcd.print(F("----"));
+            else lcd.print(F("----")); // temperature is out of normal range
             
             lcd.write((uint8_t)0); // print degree-symbol
-            lcd.print("F");
+            lcd.print(F("F"));
             break;
         }
         case 4: // Kelvin
@@ -781,7 +747,7 @@ void lcd_print_external_temperature(void)
             else if ((TR >= 10.0) && (TR < 100.0)) lcd.print(TR, 2);
             else if (TR >= 100.0) lcd.print(TR, 1);
             else lcd.print(F("-----"));
-            lcd.print("K");
+            lcd.print(F("K"));
             break;
         }
     }
@@ -797,25 +763,25 @@ Note:     -
 void lcd_blank_external_temperature(void)
 {
     lcd.setCursor(3, 1);
-    lcd.print("----");
+    lcd.print(F("----"));
     
     switch (temperature_unit)
     {
         case 1: // Celsius
         {
             lcd.write((uint8_t)0); // print degree-symbol
-            lcd.print("C");
+            lcd.print(F("C"));
             break;
         }
         case 2: // Fahrenheit
         {
             lcd.write((uint8_t)0); // print degree-symbol
-            lcd.print("F");
+            lcd.print(F("F"));
             break;
         }
         case 4: // Kelvin
         {
-            lcd.print("-K");
+            lcd.print(F("-K"));
             break;
         }
     }
@@ -838,13 +804,8 @@ void lcd_print_internal_temperature(void)
             
             float TR = roundf(T_int[1] * 100.0);  // float rounded to 2 decimal places
             TR = TR / 100.0;
-            
-            if ((TR <= -10.0) || (TR >= 100.0))
-            {
-                lcd.print(" ");
-                lcd.print(TR);
-            }
-            else if ((TR > -10.0) && (TR < 0.0))
+
+            if ((TR > -10.0) && (TR < 0.0))
             {
                lcd.print(TR, 1);
             }
@@ -856,10 +817,10 @@ void lcd_print_internal_temperature(void)
             {
                 lcd.print(TR, 1);
             }
-            else lcd.print(F("----"));
+            else lcd.print(F("----")); // temperature is out of normal range
 
             lcd.write((uint8_t)0); // print degree-symbol
-            lcd.print("C");
+            lcd.print(F("C"));
             break;
         }
         case 2: // Fahrenheit
@@ -868,13 +829,8 @@ void lcd_print_internal_temperature(void)
             
             float TR = roundf(T_int[2] * 100.0);  // float rounded to 2 decimal places
             TR = TR / 100.0;
-            
-            if ((TR <= -10.0) || (TR >= 100.0))
-            {
-                lcd.print(" ");
-                lcd.print(TR);
-            }
-            else if ((TR > -10.0) && (TR < 0.0))
+
+            if ((TR > -10.0) && (TR < 0.0))
             {
                lcd.print(TR, 1);
             }
@@ -886,10 +842,10 @@ void lcd_print_internal_temperature(void)
             {
                 lcd.print(TR, 1);
             }
-            else lcd.print(F("----"));
+            else lcd.print(F("----")); // temperature is out of normal range
     
             lcd.write((uint8_t)0); // print degree-symbol
-            lcd.print("F");
+            lcd.print(F("F"));
             break;
         }
         case 4: // Kelvin
@@ -903,7 +859,7 @@ void lcd_print_internal_temperature(void)
             else if ((TR >= 10.0) && (TR < 100.0)) lcd.print(TR, 2);
             else if (TR >= 100.0) lcd.print(TR, 1);
             else lcd.print(F("-----"));
-            lcd.print("K");
+            lcd.print(F("K"));
             break;
         }
     }
@@ -919,25 +875,25 @@ Note:     -
 void lcd_blank_internal_temperature(void)
 {
     lcd.setCursor(14, 1);
-    lcd.print("----");
+    lcd.print(F("----"));
     
     switch (temperature_unit)
     {
         case 1: // Celsius
         {
             lcd.write((uint8_t)0); // print degree-symbol
-            lcd.print("C");
+            lcd.print(F("C"));
             break;
         }
         case 2: // Fahrenheit
         {
             lcd.write((uint8_t)0); // print degree-symbol
-            lcd.print("F");
+            lcd.print(F("F"));
             break;
         }
         case 4: // Kelvin
         {
-            lcd.print("-K");
+            lcd.print(F("-K"));
             break;
         }
     }
@@ -963,15 +919,15 @@ void lcd_update(void)
             uint8_t percent = (uint8_t)(round(((float)wpump_pwm + 1.0) * 100.0 / 256.0));
             if (percent < 10)
             {
-                lcd.print("  ");
+                lcd.print(F("  "));
                 lcd.print(percent);
-                lcd.print("%");
+                lcd.print(F("%"));
             }
             else if (percent < 100)
             {
-                lcd.print(" ");
+                lcd.print(F(" "));
                 lcd.print(percent);
-                lcd.print("%");
+                lcd.print(F("%"));
             }
             else lcd.print(F("100%"));
         }
@@ -1016,13 +972,13 @@ void lcd_update(void)
             handle_remaining_time();
 
             lcd.setCursor(7, 2);
-            if (h < 10) lcd.print("0");
+            if (h < 10) lcd.print(F("0"));
             lcd.print(h);
-            lcd.print(":");
-            if (m < 10) lcd.print("0");
+            lcd.print(F(":"));
+            if (m < 10) lcd.print(F("0"));
             lcd.print(m);
-            lcd.print(":");
-            if (s < 10) lcd.print("0");
+            lcd.print(F(":"));
+            if (s < 10) lcd.print(F("0"));
             lcd.print(s);
             lcd.print(F(" left"));
         }
@@ -1207,14 +1163,14 @@ void update_status(void)
             {
                 handle_remaining_time();
                 
-                if (h < 10) Serial.print("0");
+                if (h < 10) Serial.print(F("0"));
                 Serial.print(h);
-                Serial.print(":");
-                if (m < 10) Serial.print("0");
+                Serial.print(F(":"));
+                if (m < 10) Serial.print(F("0"));
                 Serial.print(m);
                 Serial.flush();
-                Serial.print(":");
-                if (s < 10) Serial.print("0");
+                Serial.print(F(":"));
+                if (s < 10) Serial.print(F("0"));
                 Serial.print(s);
                 Serial.println(F(" left"));
             }
@@ -1989,9 +1945,9 @@ void handle_usb_data(void)
                     
                     for (uint8_t i = 0; i < sizeof(avr_signature); i++)
                     {
-                        if (avr_signature[i] < 16) Serial.print("0"); // print leading zero
+                        if (avr_signature[i] < 16) Serial.print(F("0")); // print leading zero
                         Serial.print(avr_signature[i], HEX); // print signature byte in hexadecimal format
-                        Serial.print(" "); // insert whitespace between bytes
+                        Serial.print(F(" ")); // insert whitespace between bytes
                     }
 
                     Serial.flush();
@@ -2481,15 +2437,25 @@ void setup()
 {
     sei(); // enable interrupts
     Serial.begin(250000);
+
+    analogReference(DEFAULT);
+
     pinMode(RED_LED_PIN, OUTPUT);
     digitalWrite(RED_LED_PIN, HIGH); // turn off red LED
     pinMode(WATERPUMP_PIN, OUTPUT);
+    digitalWrite(WATERPUMP_PIN, LOW); // turn off water pump
+
     attachInterrupt(digitalPinToInterrupt(2), handle_mode_button, FALLING);
+
     Timer1.initialize(2040); // 2040 us ~= 490 Hz
     Timer1.pwm(WATERPUMP_PIN, 0); // turn off water pump, duty cycle: 0-1023
+
     read_avr_signature(avr_signature); // read AVR signature bytes that identifies the microcontroller
+
     lcd_init(); // init LCD
+
     delay(2000);
+
     lcd_print_default_layout();
     read_eeprom_settings(); // read internal EEPROM for stored settings
     wdt_enable(WDTO_4S); // setup watchdog timer to reset program if it hangs for more than 4 seconds
@@ -2562,14 +2528,15 @@ void loop()
 
     if (service_mode) // blink red LED when in service mode
     {   
-        if (current_millis - previous_led_blink >= service_mode_blinking_interval)
+        if ((uint32_t)(current_millis - previous_led_blink) >= service_mode_blinking_interval)
         {
-            previous_led_blink = current_millis; // save current time
+            if ((previous_led_blink - last_update_millis) != service_mode_blinking_interval) previous_led_blink = last_update_millis + service_mode_blinking_interval; // avoid blinking issues by shifting the blink start after Serial/LCD update
+            else previous_led_blink = current_millis; // save current time
             digitalWrite(RED_LED_PIN, LOW); // turn on red LED
             red_led_ontime = current_millis; // save time when red LED was turned on
         }
 
-        if (current_millis - red_led_ontime >= led_blink_duration)
+        if ((uint32_t)(current_millis - red_led_ontime) >= led_blink_duration)
         {
             digitalWrite(RED_LED_PIN, HIGH); // turn off red LED
         }
